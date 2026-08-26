@@ -16,3 +16,5 @@ def load_and_validate_data(file_path_or_buffer) -> pd.DataFrame:
     df['amount_eur'] = pd.to_numeric(df['amount_eur'], errors='coerce').fillna(0.0)
     df['date'] = pd.to_datetime(df['date'], errors='coerce')
     return df
+
+# Subject to Change
