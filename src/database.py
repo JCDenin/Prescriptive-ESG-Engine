@@ -365,11 +365,15 @@ def set_review(conn, transaction_id, new_category=None, reviewed_by="system"):
 
 SESSION_HOURS = 12
 
+# Roles: 'admin' (everything incl. account/dataset management), 'analyst'
+# (upload, review, reports), 'viewer' (read-only — for stakeholders).
 DEFAULT_USERS = [
     # (username, password, display name, role)
     ("admin", "admin", "Administrator", "admin"),
-    ("omar", "omar", "Omar", "admin"),
-    ("viktor", "viktor", "Viktor", "analyst"),
+    ("omar", "omar", "Omar (Developer)", "admin"),
+    ("viktor", "viktor", "Viktor (Developer)", "admin"),
+    ("vladlen", "vladlen", "Vladlen (Product Owner)", "viewer"),
+    ("vetalii", "vetalii", "Vetalii (Scrum Master)", "viewer"),
 ]
 
 
@@ -383,9 +387,11 @@ def _hash_password(password, salt=None):
 
 
 def ensure_default_users(conn):
-    if conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
-        for username, password, display_name, role in DEFAULT_USERS:
-            create_user(conn, username, password, display_name, role)
+    # Insert any missing default account (create_user is a no-op on
+    # duplicates), so newly added team members appear on existing databases
+    # too — not only on a fresh one.
+    for username, password, display_name, role in DEFAULT_USERS:
+        create_user(conn, username, password, display_name, role)
 
 
 def create_user(conn, username, password, display_name, role="analyst"):

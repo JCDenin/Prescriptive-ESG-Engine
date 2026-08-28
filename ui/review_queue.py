@@ -34,6 +34,7 @@ def render(conn, user):
         f"Show all {len(pending)} pending", key="review_show_all"
     )
     visible = pending if show_all else pending.head(PAGE_SIZE)
+    can_review = user["role"] != "viewer"
     for row in visible.itertuples():
         label = f"{row.merchant_name} — EUR {row.amount_eur:,.2f}"
         with st.sidebar.expander(label):
@@ -42,6 +43,8 @@ def render(conn, user):
                 f"{row.department} · {row.payment_channel} · {row.expense_context}"
             )
             st.caption(f"Suggested: {row.category} (confidence {row.confidence:.0%})")
+            if not can_review:
+                continue
             choice = st.selectbox(
                 "Category", CATEGORY_OPTIONS,
                 index=CATEGORY_OPTIONS.index(row.category) if row.category in CATEGORY_OPTIONS else CATEGORY_OPTIONS.index("unknown"),
