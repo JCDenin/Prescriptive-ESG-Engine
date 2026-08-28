@@ -5,21 +5,21 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from src import classification as classifier, database as db
+from src import classification as classifier, database as db, ingestion
 
 SAMPLE_PATH = Path(__file__).resolve().parent.parent / "data" / "sample_transactions.csv"
 
 
 def _ingest(conn, raw: pd.DataFrame, source: str):
-    # NOTE (Viktor): once the real pipeline lands, swap this inline validation
-    # for src.ingestion.load_and_validate_data (same 9-column contract).
-    missing = [c for c in db.CSV_COLUMNS if c not in raw.columns]
-    if missing:
-        st.error(f"Invalid file — missing columns: {', '.join(missing)}")
+    try:
+        validated_df = ingestion.load_and_validate_data(raw)
+    except ValueError as e:
+        st.error(f"Invalid file: {e}")
         return
-    raw = raw.astype({"time": str})
-    db.ingest_transactions(conn, raw)
-    db.store_classifications(conn, classifier.classify_transactions(raw))
+
+    validated_df = validated_df.astype({"time": str})
+    db.ingest_transactions(conn, validated_df)
+    db.store_classifications(conn, classifier.classify_transactions(validated_df))
     st.session_state["last_ingest"] = source
     st.rerun()
 
@@ -60,4 +60,4 @@ def render(conn):
          "amount_eur", "payment_channel", "category", "scope3_category",
          "confidence", "review_status"]
     ].head(100)
-    st.dataframe(preview, width="stretch", height=320)
+    st.dataframe(preview, use_container_width=True, height=320)
