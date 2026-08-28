@@ -15,17 +15,33 @@ st.set_page_config(
 )
 
 # Corporate finance look: neutral base, restrained accents (see task doc).
+# Palette comes from .streamlit/config.toml; CSS uses Streamlit theme
+# variables so a manual switch to dark mode still renders with clean contrast.
 st.markdown(
     """
     <style>
-    .stApp { background-color: #FAFAFA; }
-    section[data-testid="stSidebar"] { background-color: #F1F3F5; }
+    /* Translucent neutral card: renders correctly on light AND dark themes
+       (Streamlit exposes no theme CSS variables to hook into). */
     div[data-testid="stMetric"] {
-        background: #FFFFFF; border: 1px solid #E3E6E8;
+        background: rgba(128, 128, 128, 0.07);
+        border: 1px solid rgba(128, 128, 128, 0.28);
         border-radius: 8px; padding: 12px 16px;
     }
-    h1, h2, h3 { color: #1F2933; }
-    </style>
+    /* Metric text must adapt to zoom/narrow columns instead of truncating
+       with an ellipsis: viewport-relative font size + wrapping fallback. */
+    div[data-testid="stMetricValue"] {
+        font-size: clamp(1.05rem, 1.6vw + 0.4rem, 2.1rem) !important;
+    }
+    div[data-testid="stMetricValue"] > div,
+    div[data-testid="stMetricLabel"],
+    div[data-testid="stMetricLabel"] p,
+    div[data-testid="stMetricDelta"],
+    div[data-testid="stMetricDelta"] > div {
+        white-space: normal !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
+    }
+</style>
     """,
     unsafe_allow_html=True,
 )
