@@ -11,6 +11,7 @@ from src import database as db
 from src.emissions import FACTORS_KG_PER_EUR
 
 CATEGORY_OPTIONS = sorted(FACTORS_KG_PER_EUR)
+PAGE_SIZE = 15
 
 
 def render(conn):
@@ -29,7 +30,11 @@ def render(conn):
         "Low-confidence classifications. Approve or correct the category; "
         "reviewed records then count toward reports and recommendations."
     )
-    for row in pending.head(15).itertuples():
+    show_all = len(pending) <= PAGE_SIZE or st.sidebar.toggle(
+        f"Show all {len(pending)} pending", key="review_show_all"
+    )
+    visible = pending if show_all else pending.head(PAGE_SIZE)
+    for row in visible.itertuples():
         label = f"{row.merchant_name} — EUR {row.amount_eur:,.2f}"
         with st.sidebar.expander(label):
             st.caption(
@@ -45,5 +50,7 @@ def render(conn):
             if st.button("Approve", key=f"ok_{row.transaction_id}", type="primary"):
                 db.set_review(conn, row.transaction_id, new_category=choice)
                 st.rerun()
-    if len(pending) > 15:
-        st.sidebar.caption(f"...and {len(pending) - 15} more.")
+    if not show_all:
+        st.sidebar.caption(
+            f"...and {len(pending) - PAGE_SIZE} more — use the toggle above to show all."
+        )

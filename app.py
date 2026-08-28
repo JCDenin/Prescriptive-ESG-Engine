@@ -27,19 +27,19 @@ st.markdown(
         border: 1px solid rgba(128, 128, 128, 0.28);
         border-radius: 8px; padding: 12px 16px;
     }
-    /* Metric text must adapt to zoom/narrow columns instead of truncating
-       with an ellipsis: viewport-relative font size + wrapping fallback. */
+    /* Metric text must adapt to zoom/narrow columns instead of truncating.
+       Streamlit applies the ellipsis on nested inner nodes, so the override
+       must cover EVERY descendant of the metric card, not named testids. */
     div[data-testid="stMetricValue"] {
-        font-size: clamp(1.05rem, 1.6vw + 0.4rem, 2.1rem) !important;
+        font-size: clamp(1rem, 1.6vw + 0.35rem, 2.1rem) !important;
+        line-height: 1.25 !important;
     }
-    div[data-testid="stMetricValue"] > div,
-    div[data-testid="stMetricLabel"],
-    div[data-testid="stMetricLabel"] p,
-    div[data-testid="stMetricDelta"],
-    div[data-testid="stMetricDelta"] > div {
+    div[data-testid="stMetric"],
+    div[data-testid="stMetric"] * {
         white-space: normal !important;
         overflow: visible !important;
         text-overflow: clip !important;
+        max-width: none !important;
     }
 </style>
     """,
