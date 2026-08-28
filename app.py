@@ -6,7 +6,7 @@ Run:  streamlit run app.py     (demo login: admin / admin)
 import streamlit as st
 
 from src import database as db
-from ui import overview, recommendations, review_queue, upload
+from ui import accounts, overview, recommendations, review_queue, upload
 
 st.set_page_config(
     page_title="Prescriptive ESG Dashboard",
@@ -52,46 +52,73 @@ def get_conn():
     return db.get_conn()
 
 
-def login_gate():
+def restore_session(conn):
+    """Refresh-proof login: a browser reload wipes st.session_state, but the
+    session token survives in the URL query string — validate it against the
+    sessions table and restore the user."""
+    if "user" in st.session_state:
+        return
+    token = st.query_params.get("session")
+    if token:
+        user = db.session_user(conn, token)
+        if user:
+            st.session_state["user"] = user
+            st.session_state["token"] = token
+
+
+def login_gate(conn):
     st.title("Prescriptive ESG Dashboard")
     st.caption("Scope 3 Category 6 & 7 monitoring — MVP demo")
     with st.form("login"):
-        user = st.text_input("Username")
+        username = st.text_input("Username")
         password = st.text_input("Password", type="password")
         if st.form_submit_button("Sign in", type="primary"):
-            if user == "admin" and password == "admin":
-                st.session_state["authenticated"] = True
+            user = db.verify_user(conn, username, password)
+            if user:
+                token = db.create_session(conn, user["username"])
+                st.session_state["user"] = user
+                st.session_state["token"] = token
+                st.query_params["session"] = token
                 st.rerun()
             else:
                 st.error("Invalid credentials.")
 
 
-def main():
-    conn = get_conn()
+def main(conn):
+    user = st.session_state["user"]
     header_left, header_right = st.columns([5, 1])
     header_left.title("Prescriptive ESG Dashboard")
     header_left.caption(
         "Transaction-based Scope 3 monitoring: business-travel leakage "
         "(Category 6) and commuting patterns (Category 7)"
     )
+    header_right.caption(f"{user['display_name']} · {user['role']}")
     if header_right.button("Sign out"):
+        db.delete_session(conn, st.session_state.get("token", ""))
+        st.query_params.clear()
         st.session_state.clear()
         st.rerun()
 
     review_queue.render(conn)
 
-    tab_upload, tab_overview, tab_recs = st.tabs(
-        ["Data Upload", "Emissions & Financial Overview", "Recommendations"]
-    )
-    with tab_upload:
+    tab_names = ["Data Upload", "Emissions & Financial Overview", "Recommendations"]
+    if user["role"] == "admin":
+        tab_names.append("Team Accounts")
+    tabs = st.tabs(tab_names)
+    with tabs[0]:
         upload.render(conn)
-    with tab_overview:
+    with tabs[1]:
         overview.render(conn)
-    with tab_recs:
+    with tabs[2]:
         recommendations.render(conn)
+    if user["role"] == "admin":
+        with tabs[3]:
+            accounts.render(conn, user)
 
 
-if st.session_state.get("authenticated"):
-    main()
+_conn = get_conn()
+restore_session(_conn)
+if st.session_state.get("user"):
+    main(_conn)
 else:
-    login_gate()
+    login_gate(_conn)

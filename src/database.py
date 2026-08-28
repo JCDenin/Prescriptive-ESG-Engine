@@ -63,13 +63,138 @@ CREATE TABLE IF NOT EXISTS classifications (
     review_status TEXT NOT NULL,
     reviewed_category TEXT
 );
+CREATE TABLE IF NOT EXISTS users (
+    username TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'analyst',
+    salt TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sessions (
+    token TEXT PRIMARY KEY,
+    username TEXT NOT NULL REFERENCES users(username),
+    expires_at TEXT NOT NULL
+);
 """
 
 
 def get_conn(db_path=DB_PATH):
     conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.executescript(_SCHEMA)
+    ensure_default_users(conn)
     return conn
+
+
+# --- Accounts & refresh-proof sessions --------------------------------------
+# Demo-grade auth: PBKDF2-hashed passwords in SQLite plus opaque session
+# tokens (carried in the URL query string) so a browser refresh does not
+# log the user out. Not production security — no rate limiting, no HTTPS
+# enforcement — but a correct pattern to build on.
+
+SESSION_HOURS = 12
+
+DEFAULT_USERS = [
+    # (username, password, display name, role)
+    ("admin", "admin", "Administrator", "admin"),
+    ("omar", "omar", "Omar", "admin"),
+    ("viktor", "viktor", "Viktor", "analyst"),
+]
+
+
+def _hash_password(password, salt=None):
+    import hashlib, secrets
+    salt = salt or secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), bytes.fromhex(salt), 100_000
+    ).hex()
+    return salt, digest
+
+
+def ensure_default_users(conn):
+    if conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
+        for username, password, display_name, role in DEFAULT_USERS:
+            create_user(conn, username, password, display_name, role)
+
+
+def create_user(conn, username, password, display_name, role="analyst"):
+    """Returns True on success, False if the username is taken/invalid."""
+    from datetime import datetime, timezone
+    username = str(username).strip().lower()
+    if not username or not password:
+        return False
+    salt, digest = _hash_password(password)
+    try:
+        conn.execute(
+            "INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)",
+            (username, str(display_name).strip() or username, role, salt, digest,
+             datetime.now(timezone.utc).isoformat(timespec="seconds")),
+        )
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+
+
+def verify_user(conn, username, password):
+    """Returns {username, display_name, role} on valid credentials, else None."""
+    row = conn.execute(
+        "SELECT username, display_name, role, salt, password_hash"
+        " FROM users WHERE username = ?", (str(username).strip().lower(),)
+    ).fetchone()
+    if row is None:
+        return None
+    _, digest = _hash_password(password, salt=row[3])
+    if digest != row[4]:
+        return None
+    return {"username": row[0], "display_name": row[1], "role": row[2]}
+
+
+def create_session(conn, username):
+    import secrets
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    conn.execute("DELETE FROM sessions WHERE expires_at < ?",
+                 (now.isoformat(timespec="seconds"),))
+    token = secrets.token_urlsafe(24)
+    conn.execute(
+        "INSERT INTO sessions VALUES (?, ?, ?)",
+        (token, username,
+         (now + timedelta(hours=SESSION_HOURS)).isoformat(timespec="seconds")),
+    )
+    conn.commit()
+    return token
+
+
+def session_user(conn, token):
+    """Returns the user dict for a valid, unexpired session token, else None."""
+    from datetime import datetime, timezone
+    row = conn.execute(
+        "SELECT u.username, u.display_name, u.role, s.expires_at"
+        " FROM sessions s JOIN users u USING (username) WHERE s.token = ?",
+        (str(token),),
+    ).fetchone()
+    if row is None or row[3] < datetime.now(timezone.utc).isoformat(timespec="seconds"):
+        return None
+    return {"username": row[0], "display_name": row[1], "role": row[2]}
+
+
+def delete_session(conn, token):
+    conn.execute("DELETE FROM sessions WHERE token = ?", (str(token),))
+    conn.commit()
+
+
+def list_users(conn):
+    return pd.read_sql_query(
+        "SELECT username, display_name, role, created_at FROM users ORDER BY username",
+        conn,
+    )
+
+
+def delete_user(conn, username):
+    conn.execute("DELETE FROM sessions WHERE username = ?", (username,))
+    conn.execute("DELETE FROM users WHERE username = ?", (username,))
+    conn.commit()
 
 
 def ingest_transactions(conn, df):

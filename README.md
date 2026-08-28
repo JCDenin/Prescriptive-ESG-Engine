@@ -58,7 +58,11 @@ critical two-condition Category 6 rule (`Personal_Card_Reimbursement` **and**
    ```bash
    streamlit run app.py
    ```
-   Demo login: **admin / admin**. In the Data Upload tab click
+   Demo accounts (username / password): **admin / admin**, **omar / omar**
+   (both admin role), **viktor / viktor** (analyst). Admins get a
+   **Team Accounts** tab to create, list, and remove accounts (PBKDF2-hashed
+   passwords in SQLite). Login survives page refresh via a session token in
+   the URL (12h expiry); Sign out revokes it. In the Data Upload tab click
    **Load bundled sample dataset** (2,111 transactions, 100 employees).
 
 ## Demo Walkthrough
