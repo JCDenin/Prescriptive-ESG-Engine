@@ -365,15 +365,15 @@ def set_review(conn, transaction_id, new_category=None, reviewed_by="system"):
 
 SESSION_HOURS = 12
 
-# Roles: 'admin' (everything incl. account/dataset management), 'analyst'
-# (upload, review, reports), 'viewer' (read-only — for stakeholders).
+# Roles: every team member can do everything (upload, review, datasets,
+# reports); 'admin' additionally manages accounts in the Team Accounts tab.
 DEFAULT_USERS = [
     # (username, password, display name, role)
     ("admin", "admin", "Administrator", "admin"),
     ("omar", "omar", "Omar (Developer)", "admin"),
     ("viktor", "viktor", "Viktor (Developer)", "admin"),
-    ("vladlen", "vladlen", "Vladlen (Product Owner)", "viewer"),
-    ("vetalii", "vetalii", "Vetalii (Scrum Master)", "viewer"),
+    ("vladlen", "vladlen", "Vladlen (Product Owner)", "analyst"),
+    ("vetalii", "vetalii", "Vetalii (Scrum Master)", "analyst"),
 ]
 
 
@@ -392,6 +392,10 @@ def ensure_default_users(conn):
     # too — not only on a fresh one.
     for username, password, display_name, role in DEFAULT_USERS:
         create_user(conn, username, password, display_name, role)
+    # The short-lived read-only 'viewer' role was removed: everyone works,
+    # only admins manage accounts. Upgrade any leftover rows.
+    conn.execute("UPDATE users SET role = 'analyst' WHERE role = 'viewer'")
+    conn.commit()
 
 
 def create_user(conn, username, password, display_name, role="analyst"):

@@ -47,7 +47,7 @@ def _history(conn, user):
         width="stretch", hide_index=True,
     )
     inactive = datasets[datasets["is_active"] == 0]
-    if not inactive.empty and user["role"] != "viewer":
+    if not inactive.empty:
         options = {
             f"#{r.dataset_id} — {r.label} ({r.uploaded_at}, {r.n_rows} rows)": r.dataset_id
             for r in inactive.itertuples()
@@ -57,7 +57,7 @@ def _history(conn, user):
         if c2.button("Activate"):
             db.activate_dataset(conn, options[choice], user["username"])
             st.rerun()
-        if user["role"] == "admin" and c3.button("Delete", type="secondary"):
+        if c3.button("Delete", type="secondary"):
             db.delete_dataset(conn, options[choice], user["username"])
             st.rerun()
 
@@ -70,21 +70,17 @@ def render(conn, user):
         "routed to the review queue in the sidebar."
     )
 
-    if user["role"] == "viewer":
-        st.info("Read-only access: viewers can browse data and reports but "
-                "cannot upload or switch datasets.")
-    else:
-        label = st.text_input(
-            "Dataset label (for the history)", placeholder="e.g. June 2026 export",
-        )
-        uploaded = st.file_uploader("Transaction CSV", type="csv")
-        col_a, col_b = st.columns([1, 3])
-        if col_a.button("Process uploaded file", type="primary", disabled=uploaded is None):
-            _ingest(conn, pd.read_csv(uploaded, dtype={"time": str}), uploaded.name,
-                    user, label)
-        if SAMPLE_PATH.exists() and col_b.button("Load bundled sample dataset"):
-            _ingest(conn, pd.read_csv(SAMPLE_PATH, dtype={"time": str}),
-                    SAMPLE_PATH.name, user, label or "Bundled sample")
+    label = st.text_input(
+        "Dataset label (for the history)", placeholder="e.g. June 2026 export",
+    )
+    uploaded = st.file_uploader("Transaction CSV", type="csv")
+    col_a, col_b = st.columns([1, 3])
+    if col_a.button("Process uploaded file", type="primary", disabled=uploaded is None):
+        _ingest(conn, pd.read_csv(uploaded, dtype={"time": str}), uploaded.name,
+                user, label)
+    if SAMPLE_PATH.exists() and col_b.button("Load bundled sample dataset"):
+        _ingest(conn, pd.read_csv(SAMPLE_PATH, dtype={"time": str}),
+                SAMPLE_PATH.name, user, label or "Bundled sample")
 
     st.divider()
     _history(conn, user)

@@ -4,7 +4,7 @@ import streamlit as st
 
 from src import database as db
 
-ROLES = ["analyst", "admin", "viewer"]
+ROLES = ["analyst", "admin"]
 
 
 def render(conn, current_user):
