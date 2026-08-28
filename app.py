@@ -117,6 +117,7 @@ def main(conn):
 
 
 _conn = get_conn()
+db.ensure_schema(_conn)  # cached conn may predate schema additions
 restore_session(_conn)
 if st.session_state.get("user"):
     main(_conn)

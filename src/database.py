@@ -79,10 +79,18 @@ CREATE TABLE IF NOT EXISTS sessions (
 """
 
 
-def get_conn(db_path=DB_PATH):
-    conn = sqlite3.connect(db_path, check_same_thread=False)
+def ensure_schema(conn):
+    """Idempotent and cheap — safe to call on every rerun. Needed because a
+    cached connection can outlive a code update (Streamlit Cloud hot-swaps
+    the code without restarting the process), so newly added tables must be
+    created on existing connections too."""
     conn.executescript(_SCHEMA)
     ensure_default_users(conn)
+
+
+def get_conn(db_path=DB_PATH):
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    ensure_schema(conn)
     return conn
 
 
