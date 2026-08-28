@@ -86,6 +86,41 @@ def login_gate(conn):
                 st.error("Invalid credentials.")
 
 
+def change_password_gate(conn):
+    """First-login password change (Lab_Webapp mustChangePassword pattern):
+    the account works, but nothing else is accessible until the user sets a
+    password of their own."""
+    user = st.session_state["user"]
+    st.title("Prescriptive ESG Dashboard")
+    st.subheader(f"Welcome, {user['display_name']} — set your own password")
+    st.caption(
+        "You are signing in with a temporary password. Choose a new one to "
+        "continue; you will use it from now on."
+    )
+    with st.form("change_password"):
+        new = st.text_input("New password", type="password")
+        confirm = st.text_input("Repeat new password", type="password")
+        if st.form_submit_button("Save and continue", type="primary"):
+            if len(new) < 6:
+                st.error("Password must be at least 6 characters.")
+            elif new.lower() == user["username"]:
+                st.error("Password must not be your username.")
+            elif db.verify_user(conn, user["username"], new):
+                st.error("Choose a password different from the current one.")
+            elif new != confirm:
+                st.error("Passwords do not match.")
+            else:
+                db.set_password(conn, user["username"], new)
+                st.session_state["user"]["must_change_password"] = 0
+                st.session_state["just_signed_in"] = True
+                st.rerun()
+    if st.button("Sign out"):
+        db.delete_session(conn, st.session_state.get("token", ""))
+        st.query_params.clear()
+        st.session_state.clear()
+        st.rerun()
+
+
 def _welcome(conn, user):
     """Welcoming state: greet on sign-in, and show a getting-started panel
     while no dataset is active."""
@@ -146,6 +181,9 @@ _conn = get_conn()
 db.ensure_schema(_conn)  # cached conn may predate schema additions
 restore_session(_conn)
 if st.session_state.get("user"):
-    main(_conn)
+    if st.session_state["user"].get("must_change_password"):
+        change_password_gate(_conn)
+    else:
+        main(_conn)
 else:
     login_gate(_conn)

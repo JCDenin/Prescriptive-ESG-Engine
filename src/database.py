@@ -92,7 +92,8 @@ CREATE TABLE IF NOT EXISTS users (
     role TEXT NOT NULL DEFAULT 'analyst',
     salt TEXT NOT NULL,
     password_hash TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    must_change_password INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS sessions (
     token TEXT PRIMARY KEY,
@@ -129,8 +130,25 @@ def ensure_schema(conn):
     cl_cols = [r[1] for r in conn.execute("PRAGMA table_info(classifications)")]
     if cl_cols and "reviewed_by" not in cl_cols:
         conn.executescript("DROP TABLE IF EXISTS classifications;")
+    u_cols = [r[1] for r in conn.execute("PRAGMA table_info(users)")]
+    migrate_pw_flag = bool(u_cols) and "must_change_password" not in u_cols
+    if migrate_pw_flag:
+        conn.execute(
+            "ALTER TABLE users ADD COLUMN must_change_password"
+            " INTEGER NOT NULL DEFAULT 0"
+        )
     conn.executescript(_SCHEMA)
     ensure_default_users(conn)
+    if migrate_pw_flag:
+        # One-shot: accounts still using their seeded default password must
+        # change it on next sign-in (ported from Lab_Webapp mustChangePassword).
+        for username, password, _, _ in DEFAULT_USERS:
+            if verify_user(conn, username, password):
+                conn.execute(
+                    "UPDATE users SET must_change_password = 1 WHERE username = ?",
+                    (username,),
+                )
+        conn.commit()
 
 
 def get_conn(db_path=DB_PATH):
@@ -398,17 +416,20 @@ def ensure_default_users(conn):
     conn.commit()
 
 
-def create_user(conn, username, password, display_name, role="analyst"):
-    """Returns True on success, False if the username is taken/invalid."""
+def create_user(conn, username, password, display_name, role="analyst",
+                must_change=True):
+    """Returns True on success, False if the username is taken/invalid.
+    New accounts must change their password on first sign-in by default
+    (Lab_Webapp mustChangePassword pattern)."""
     username = str(username).strip().lower()
     if not username or not password:
         return False
     salt, digest = _hash_password(password)
     try:
         conn.execute(
-            "INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?)",
             (username, str(display_name).strip() or username, role, salt, digest,
-             _utcnow()),
+             _utcnow(), int(must_change)),
         )
         conn.commit()
         return True
@@ -416,10 +437,28 @@ def create_user(conn, username, password, display_name, role="analyst"):
         return False
 
 
+def set_password(conn, username, new_password, must_change=False,
+                 changed_by=None):
+    """Set a new password; clears (or re-arms, for admin resets) the
+    must-change flag."""
+    salt, digest = _hash_password(new_password)
+    conn.execute(
+        "UPDATE users SET salt = ?, password_hash = ?, must_change_password = ?"
+        " WHERE username = ?",
+        (salt, digest, int(must_change), str(username).strip().lower()),
+    )
+    conn.commit()
+    actor = changed_by or username
+    what = "reset (temporary)" if must_change else "changed"
+    log_action(conn, actor, "auth.password_change",
+               f"Password {what} for '{username}'", str(username))
+
+
 def verify_user(conn, username, password):
-    """Returns {username, display_name, role} on valid credentials, else None."""
+    """Returns the user dict on valid credentials, else None."""
     row = conn.execute(
-        "SELECT username, display_name, role, salt, password_hash"
+        "SELECT username, display_name, role, salt, password_hash,"
+        " must_change_password"
         " FROM users WHERE username = ?", (str(username).strip().lower(),)
     ).fetchone()
     if row is None:
@@ -427,7 +466,8 @@ def verify_user(conn, username, password):
     _, digest = _hash_password(password, salt=row[3])
     if digest != row[4]:
         return None
-    return {"username": row[0], "display_name": row[1], "role": row[2]}
+    return {"username": row[0], "display_name": row[1], "role": row[2],
+            "must_change_password": int(row[5])}
 
 
 def create_session(conn, username):
@@ -449,13 +489,15 @@ def create_session(conn, username):
 def session_user(conn, token):
     """Returns the user dict for a valid, unexpired session token, else None."""
     row = conn.execute(
-        "SELECT u.username, u.display_name, u.role, s.expires_at"
+        "SELECT u.username, u.display_name, u.role, u.must_change_password,"
+        " s.expires_at"
         " FROM sessions s JOIN users u USING (username) WHERE s.token = ?",
         (str(token),),
     ).fetchone()
-    if row is None or row[3] < _utcnow():
+    if row is None or row[4] < _utcnow():
         return None
-    return {"username": row[0], "display_name": row[1], "role": row[2]}
+    return {"username": row[0], "display_name": row[1], "role": row[2],
+            "must_change_password": int(row[3])}
 
 
 def delete_session(conn, token):

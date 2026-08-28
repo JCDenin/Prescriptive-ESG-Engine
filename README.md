@@ -60,9 +60,12 @@ critical two-condition Category 6 rule (`Personal_Card_Reimbursement` **and**
    ```
    Demo accounts (username / password, all lowercase): **admin/admin**,
    **omar/omar**, **viktor/viktor** (admin), **vladlen/vladlen** (Product
-   Owner), **vetalii/vetalii** (Scrum Master). Every team member can do
-   everything (upload, review, datasets, reports); only admins additionally
-   get the **Team Accounts** tab to create and remove accounts
+   Owner), **vetalii/vetalii** (Scrum Master). These are temporary
+   passwords: on first sign-in the app requires each member to set their
+   own (admins can also reset any account back to a temporary password).
+   Every team member can do everything (upload, review, datasets, reports);
+   only admins additionally get the **Team Accounts** tab to create,
+   reset, and remove accounts
    (PBKDF2-hashed passwords in SQLite). Login survives page refresh via a
    session token in the URL (12h expiry); Sign out revokes it. In the Data
    Upload tab click
