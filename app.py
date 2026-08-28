@@ -79,10 +79,31 @@ def login_gate(conn):
                 token = db.create_session(conn, user["username"])
                 st.session_state["user"] = user
                 st.session_state["token"] = token
+                st.session_state["just_signed_in"] = True
                 st.query_params["session"] = token
                 st.rerun()
             else:
                 st.error("Invalid credentials.")
+
+
+def _welcome(conn, user):
+    """Welcoming state: greet on sign-in, and show a getting-started panel
+    while no dataset is active."""
+    if st.session_state.pop("just_signed_in", False):
+        st.toast(f"Welcome back, {user['display_name']}", icon=None)
+    if not db.has_data(conn):
+        with st.container(border=True):
+            st.markdown(f"### Welcome, {user['display_name']}")
+            st.markdown(
+                "No dataset is active yet. Three steps to a full report:\n\n"
+                "1. **Load data** — open the *Data Upload* tab and load the "
+                "bundled sample dataset (or upload a CSV export).\n"
+                "2. **Review** — approve the low-confidence records in the "
+                "*Review queue* (sidebar); reviewed records count toward all "
+                "figures.\n"
+                "3. **Analyze** — see the *Emissions & Financial Overview*, "
+                "the MACC *Recommendations*, and export from *Reports*."
+            )
 
 
 def main(conn):
@@ -101,6 +122,7 @@ def main(conn):
         st.rerun()
 
     review_queue.render(conn, user)
+    _welcome(conn, user)
 
     tab_names = ["Data Upload", "Emissions & Financial Overview",
                  "Recommendations", "Reports"]
