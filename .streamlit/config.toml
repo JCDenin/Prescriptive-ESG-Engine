@@ -1,0 +1,9 @@
+# Corporate light theme per the PO's UI style guide (neutral base, single
+# green accent). Defined here so the deployed app defaults to a consistent
+# look instead of following each viewer's system dark/light preference.
+[theme]
+base = "light"
+primaryColor = "#1B7F4B"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F1F3F5"
+textColor = "#1F2933"
