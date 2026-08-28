@@ -85,16 +85,26 @@ def ingest_transactions(conn, df):
     for dept in sorted(df["department"].unique()):
         conn.execute(
             "INSERT INTO departments (name, travel_budget_eur) VALUES (?, ?)",
-            (dept, DEFAULT_BUDGETS.get(dept, FALLBACK_BUDGET)),
+            (str(dept), DEFAULT_BUDGETS.get(dept, FALLBACK_BUDGET)),
         )
     employees = df[["employee_id", "department"]].drop_duplicates("employee_id")
     conn.executemany(
         "INSERT INTO employees (employee_id, department) VALUES (?, ?)",
-        employees.itertuples(index=False),
+        [(str(r.employee_id), str(r.department)) for r in employees.itertuples(index=False)],
     )
+    # Bind plain Python types only: depending on the pandas/numpy version,
+    # itertuples can yield numpy/arrow scalars that sqlite3 refuses
+    # (InterfaceError on Streamlit Cloud, while the same code passes locally).
     conn.executemany(
         "INSERT INTO transactions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        df.itertuples(index=False),
+        [
+            (
+                str(r.transaction_id), str(r.employee_id), str(r.department),
+                str(r.date), str(r.time), str(r.merchant_name),
+                float(r.amount_eur), str(r.payment_channel), str(r.expense_context),
+            )
+            for r in df.itertuples(index=False)
+        ],
     )
     conn.commit()
 
@@ -104,8 +114,9 @@ def store_classifications(conn, df):
     scope3_category, confidence, co2e_kg, leakage_flag, commute_pattern."""
     rows = [
         (
-            r.transaction_id, r.category, r.scope3_category, float(r.confidence),
-            float(r.co2e_kg), int(r.leakage_flag), int(r.commute_pattern),
+            str(r.transaction_id), str(r.category), str(r.scope3_category),
+            float(r.confidence), float(r.co2e_kg), int(r.leakage_flag),
+            int(r.commute_pattern),
             "auto" if r.confidence > 0.8 else "pending", None,
         )
         for r in df.itertuples(index=False)
