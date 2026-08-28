@@ -1,8 +1,16 @@
-"""SQLite data layer: schema, ingestion, review updates, eligibility queries.
+"""SQLite data layer: schema, dataset history, ingestion, review workflow,
+accounts/sessions, audit log.
 
-Pure logic module — no Streamlit imports. The MACC engine and the Overview
-metrics must both see only rows matching ELIGIBLE_STATUSES, so unreviewed
-low-confidence transactions can never influence recommendations.
+Pure logic module — no Streamlit imports. Key invariants:
+- The MACC engine and Overview metrics only see rows matching
+  ELIGIBLE_STATUSES, so unreviewed low-confidence transactions can never
+  influence recommendations.
+- Every upload creates a new DATASET instead of overwriting data; exactly one
+  dataset is active at a time and all queries are scoped to it, so the team
+  can switch back to any earlier processed dataset (with its review state).
+- Reviews are stamped with reviewer + timestamp, and notable actions land in
+  an audit log (pattern ported from the NanoMedical Lab_Webapp AuditLog:
+  username snapshot, no FK, action strings).
 """
 
 import sqlite3
@@ -41,8 +49,18 @@ CREATE TABLE IF NOT EXISTS employees (
     employee_id TEXT PRIMARY KEY,
     department TEXT NOT NULL REFERENCES departments(name)
 );
+CREATE TABLE IF NOT EXISTS datasets (
+    dataset_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    label TEXT NOT NULL,
+    source_file TEXT,
+    uploaded_by TEXT NOT NULL,
+    uploaded_at TEXT NOT NULL,
+    n_rows INTEGER NOT NULL DEFAULT 0,
+    is_active INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS transactions (
-    transaction_id TEXT PRIMARY KEY,
+    dataset_id INTEGER NOT NULL REFERENCES datasets(dataset_id),
+    transaction_id TEXT NOT NULL,
     employee_id TEXT NOT NULL,
     department TEXT NOT NULL,
     date TEXT NOT NULL,
@@ -50,10 +68,12 @@ CREATE TABLE IF NOT EXISTS transactions (
     merchant_name TEXT NOT NULL,
     amount_eur REAL NOT NULL,
     payment_channel TEXT NOT NULL,
-    expense_context TEXT NOT NULL
+    expense_context TEXT NOT NULL,
+    PRIMARY KEY (dataset_id, transaction_id)
 );
 CREATE TABLE IF NOT EXISTS classifications (
-    transaction_id TEXT PRIMARY KEY REFERENCES transactions(transaction_id),
+    dataset_id INTEGER NOT NULL,
+    transaction_id TEXT NOT NULL,
     category TEXT NOT NULL,
     scope3_category TEXT NOT NULL,
     confidence REAL NOT NULL,
@@ -61,7 +81,10 @@ CREATE TABLE IF NOT EXISTS classifications (
     leakage_flag INTEGER NOT NULL DEFAULT 0,
     commute_pattern INTEGER NOT NULL DEFAULT 0,
     review_status TEXT NOT NULL,
-    reviewed_category TEXT
+    reviewed_category TEXT,
+    reviewed_by TEXT,
+    reviewed_at TEXT,
+    PRIMARY KEY (dataset_id, transaction_id)
 );
 CREATE TABLE IF NOT EXISTS users (
     username TEXT PRIMARY KEY,
@@ -76,14 +99,36 @@ CREATE TABLE IF NOT EXISTS sessions (
     username TEXT NOT NULL REFERENCES users(username),
     expires_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL,
+    action TEXT NOT NULL,
+    entity_id TEXT,
+    summary TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log (created_at);
 """
+
+
+def _utcnow():
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def ensure_schema(conn):
     """Idempotent and cheap — safe to call on every rerun. Needed because a
     cached connection can outlive a code update (Streamlit Cloud hot-swaps
-    the code without restarting the process), so newly added tables must be
-    created on existing connections too."""
+    the code without restarting the process). Legacy pre-dataset tables are
+    dropped and recreated (demo data is regenerable in one click)."""
+    tx_cols = [r[1] for r in conn.execute("PRAGMA table_info(transactions)")]
+    if tx_cols and "dataset_id" not in tx_cols:
+        conn.executescript(
+            "DROP TABLE IF EXISTS classifications; DROP TABLE IF EXISTS transactions;"
+        )
+    cl_cols = [r[1] for r in conn.execute("PRAGMA table_info(classifications)")]
+    if cl_cols and "reviewed_by" not in cl_cols:
+        conn.executescript("DROP TABLE IF EXISTS classifications;")
     conn.executescript(_SCHEMA)
     ensure_default_users(conn)
 
@@ -92,6 +137,224 @@ def get_conn(db_path=DB_PATH):
     conn = sqlite3.connect(db_path, check_same_thread=False)
     ensure_schema(conn)
     return conn
+
+
+# --- Audit log ---------------------------------------------------------------
+
+def log_action(conn, username, action, summary, entity_id=None):
+    conn.execute(
+        "INSERT INTO audit_log (username, action, entity_id, summary, created_at)"
+        " VALUES (?, ?, ?, ?, ?)",
+        (str(username), str(action), entity_id, str(summary), _utcnow()),
+    )
+    conn.commit()
+
+
+def get_audit_log(conn, limit=200):
+    return pd.read_sql_query(
+        "SELECT created_at, username, action, summary FROM audit_log"
+        " ORDER BY id DESC LIMIT ?", conn, params=(int(limit),),
+    )
+
+
+# --- Dataset history ---------------------------------------------------------
+
+def create_dataset(conn, label, source_file, uploaded_by, n_rows):
+    cur = conn.execute(
+        "INSERT INTO datasets (label, source_file, uploaded_by, uploaded_at,"
+        " n_rows, is_active) VALUES (?, ?, ?, ?, ?, 0)",
+        (str(label), source_file, str(uploaded_by), _utcnow(), int(n_rows)),
+    )
+    dataset_id = cur.lastrowid
+    _set_active(conn, dataset_id)
+    return dataset_id
+
+
+def _set_active(conn, dataset_id):
+    conn.execute("UPDATE datasets SET is_active = 0")
+    conn.execute("UPDATE datasets SET is_active = 1 WHERE dataset_id = ?",
+                 (int(dataset_id),))
+    conn.commit()
+
+
+def activate_dataset(conn, dataset_id, username="system"):
+    _set_active(conn, dataset_id)
+    log_action(conn, username, "dataset.activate",
+               f"Switched active dataset to #{dataset_id}", str(dataset_id))
+
+
+def active_dataset_id(conn):
+    row = conn.execute(
+        "SELECT dataset_id FROM datasets WHERE is_active = 1"
+    ).fetchone()
+    return row[0] if row else None
+
+
+def list_datasets(conn):
+    return pd.read_sql_query(
+        "SELECT dataset_id, label, source_file, uploaded_by, uploaded_at,"
+        " n_rows, is_active FROM datasets ORDER BY dataset_id DESC", conn,
+    )
+
+
+def delete_dataset(conn, dataset_id, username="system"):
+    conn.execute("DELETE FROM classifications WHERE dataset_id = ?", (int(dataset_id),))
+    conn.execute("DELETE FROM transactions WHERE dataset_id = ?", (int(dataset_id),))
+    conn.execute("DELETE FROM datasets WHERE dataset_id = ?", (int(dataset_id),))
+    conn.commit()
+    log_action(conn, username, "dataset.delete", f"Deleted dataset #{dataset_id}",
+               str(dataset_id))
+
+
+# --- Ingestion ---------------------------------------------------------------
+
+def ingest_transactions(conn, df, label="dataset", source_file=None,
+                        uploaded_by="system"):
+    """Store a raw transaction dataframe as a NEW dataset (history preserved)
+    and make it active. Returns the dataset_id."""
+    df = df[CSV_COLUMNS].copy()
+    df["amount_eur"] = pd.to_numeric(df["amount_eur"], errors="coerce").fillna(0.0)
+
+    dataset_id = create_dataset(conn, label, source_file, uploaded_by, len(df))
+
+    for dept in sorted(df["department"].unique()):
+        conn.execute(
+            "INSERT OR IGNORE INTO departments (name, travel_budget_eur) VALUES (?, ?)",
+            (str(dept), DEFAULT_BUDGETS.get(dept, FALLBACK_BUDGET)),
+        )
+    conn.executemany(
+        "INSERT OR REPLACE INTO employees (employee_id, department) VALUES (?, ?)",
+        [(str(r.employee_id), str(r.department))
+         for r in df[["employee_id", "department"]].drop_duplicates("employee_id").itertuples(index=False)],
+    )
+    # Bind plain Python types only: depending on the pandas/numpy version,
+    # itertuples can yield numpy/arrow scalars that sqlite3 refuses.
+    conn.executemany(
+        "INSERT INTO transactions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+            (
+                dataset_id,
+                str(r.transaction_id), str(r.employee_id), str(r.department),
+                str(r.date), str(r.time), str(r.merchant_name),
+                float(r.amount_eur), str(r.payment_channel), str(r.expense_context),
+            )
+            for r in df.itertuples(index=False)
+        ],
+    )
+    conn.commit()
+    log_action(conn, uploaded_by, "data.upload",
+               f"Ingested dataset #{dataset_id} '{label}' ({len(df)} rows)",
+               str(dataset_id))
+    return dataset_id
+
+
+def store_classifications(conn, df, dataset_id=None):
+    """Store classifier output for a dataset (defaults to the active one).
+    Expects columns: transaction_id, category, scope3_category, confidence,
+    co2e_kg, leakage_flag, commute_pattern."""
+    dataset_id = dataset_id if dataset_id is not None else active_dataset_id(conn)
+    rows = [
+        (
+            int(dataset_id), str(r.transaction_id), str(r.category),
+            str(r.scope3_category), float(r.confidence), float(r.co2e_kg),
+            int(r.leakage_flag), int(r.commute_pattern),
+            "auto" if r.confidence > 0.8 else "pending", None, None, None,
+        )
+        for r in df.itertuples(index=False)
+    ]
+    conn.execute("DELETE FROM classifications WHERE dataset_id = ?", (int(dataset_id),))
+    conn.executemany(
+        "INSERT INTO classifications VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        rows,
+    )
+    conn.commit()
+
+
+# --- Queries (always scoped to the active dataset) ---------------------------
+
+def _joined_query(where=""):
+    return f"""
+        SELECT t.*, c.category, c.scope3_category, c.confidence, c.co2e_kg,
+               c.leakage_flag, c.commute_pattern, c.review_status,
+               c.reviewed_category, c.reviewed_by, c.reviewed_at
+        FROM transactions t
+        JOIN classifications c
+          ON c.dataset_id = t.dataset_id
+         AND c.transaction_id = t.transaction_id
+        WHERE t.dataset_id = (SELECT dataset_id FROM datasets WHERE is_active = 1)
+        {where}
+    """
+
+
+def get_eligible(conn):
+    """All transactions allowed to feed metrics and the MACC engine."""
+    placeholders = ",".join("?" * len(ELIGIBLE_STATUSES))
+    return pd.read_sql_query(
+        _joined_query(f"AND c.review_status IN ({placeholders})"),
+        conn, params=ELIGIBLE_STATUSES,
+    )
+
+
+def get_pending(conn):
+    return pd.read_sql_query(
+        _joined_query("AND c.review_status = 'pending' ORDER BY t.date, t.time"),
+        conn,
+    )
+
+
+def get_all(conn):
+    return pd.read_sql_query(_joined_query(), conn)
+
+
+def get_budgets(conn):
+    return dict(conn.execute("SELECT name, travel_budget_eur FROM departments"))
+
+
+def has_data(conn):
+    ds = active_dataset_id(conn)
+    if ds is None:
+        return False
+    return conn.execute(
+        "SELECT COUNT(*) FROM classifications WHERE dataset_id = ?", (ds,)
+    ).fetchone()[0] > 0
+
+
+# --- Human-in-the-loop review ------------------------------------------------
+
+def set_review(conn, transaction_id, new_category=None, reviewed_by="system"):
+    """Approve a pending transaction in the active dataset; if new_category
+    differs, mark it corrected, re-derive scope and recompute its CO2e.
+    Stamps reviewer and timestamp (audit requirement)."""
+    from src import classification as classifier, emissions
+
+    ds = active_dataset_id(conn)
+    row = conn.execute(
+        "SELECT c.category, t.amount_eur, t.payment_channel, t.expense_context"
+        " FROM classifications c JOIN transactions t"
+        "   ON t.dataset_id = c.dataset_id AND t.transaction_id = c.transaction_id"
+        " WHERE c.dataset_id = ? AND c.transaction_id = ?",
+        (ds, transaction_id),
+    ).fetchone()
+    if row is None:
+        return
+    old_category, amount, channel, context = row
+
+    category = new_category or old_category
+    status = "corrected" if category != old_category else "approved"
+    scope3 = classifier.scope3_for(category, context)
+    leakage = int(classifier.is_leakage(category, channel, context))
+    co2e = emissions.co2e_kg(category, amount)
+    conn.execute(
+        "UPDATE classifications SET review_status = ?, reviewed_category = ?,"
+        " category = ?, scope3_category = ?, leakage_flag = ?, co2e_kg = ?,"
+        " reviewed_by = ?, reviewed_at = ?"
+        " WHERE dataset_id = ? AND transaction_id = ?",
+        (status, category, category, scope3, leakage, co2e,
+         str(reviewed_by), _utcnow(), ds, transaction_id),
+    )
+    conn.commit()
+    log_action(conn, reviewed_by, "review.approve",
+               f"{status} {transaction_id} as '{category}'", str(transaction_id))
 
 
 # --- Accounts & refresh-proof sessions --------------------------------------
@@ -127,7 +390,6 @@ def ensure_default_users(conn):
 
 def create_user(conn, username, password, display_name, role="analyst"):
     """Returns True on success, False if the username is taken/invalid."""
-    from datetime import datetime, timezone
     username = str(username).strip().lower()
     if not username or not password:
         return False
@@ -136,7 +398,7 @@ def create_user(conn, username, password, display_name, role="analyst"):
         conn.execute(
             "INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)",
             (username, str(display_name).strip() or username, role, salt, digest,
-             datetime.now(timezone.utc).isoformat(timespec="seconds")),
+             _utcnow()),
         )
         conn.commit()
         return True
@@ -176,13 +438,12 @@ def create_session(conn, username):
 
 def session_user(conn, token):
     """Returns the user dict for a valid, unexpired session token, else None."""
-    from datetime import datetime, timezone
     row = conn.execute(
         "SELECT u.username, u.display_name, u.role, s.expires_at"
         " FROM sessions s JOIN users u USING (username) WHERE s.token = ?",
         (str(token),),
     ).fetchone()
-    if row is None or row[3] < datetime.now(timezone.utc).isoformat(timespec="seconds"):
+    if row is None or row[3] < _utcnow():
         return None
     return {"username": row[0], "display_name": row[1], "role": row[2]}
 
@@ -202,127 +463,4 @@ def list_users(conn):
 def delete_user(conn, username):
     conn.execute("DELETE FROM sessions WHERE username = ?", (username,))
     conn.execute("DELETE FROM users WHERE username = ?", (username,))
-    conn.commit()
-
-
-def ingest_transactions(conn, df):
-    """Replace all stored data with the given raw transaction dataframe."""
-    df = df[CSV_COLUMNS].copy()
-    df["amount_eur"] = pd.to_numeric(df["amount_eur"], errors="coerce").fillna(0.0)
-
-    conn.execute("DELETE FROM classifications")
-    conn.execute("DELETE FROM transactions")
-    conn.execute("DELETE FROM employees")
-    conn.execute("DELETE FROM departments")
-
-    for dept in sorted(df["department"].unique()):
-        conn.execute(
-            "INSERT INTO departments (name, travel_budget_eur) VALUES (?, ?)",
-            (str(dept), DEFAULT_BUDGETS.get(dept, FALLBACK_BUDGET)),
-        )
-    employees = df[["employee_id", "department"]].drop_duplicates("employee_id")
-    conn.executemany(
-        "INSERT INTO employees (employee_id, department) VALUES (?, ?)",
-        [(str(r.employee_id), str(r.department)) for r in employees.itertuples(index=False)],
-    )
-    # Bind plain Python types only: depending on the pandas/numpy version,
-    # itertuples can yield numpy/arrow scalars that sqlite3 refuses
-    # (InterfaceError on Streamlit Cloud, while the same code passes locally).
-    conn.executemany(
-        "INSERT INTO transactions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        [
-            (
-                str(r.transaction_id), str(r.employee_id), str(r.department),
-                str(r.date), str(r.time), str(r.merchant_name),
-                float(r.amount_eur), str(r.payment_channel), str(r.expense_context),
-            )
-            for r in df.itertuples(index=False)
-        ],
-    )
-    conn.commit()
-
-
-def store_classifications(conn, df):
-    """Store classifier output. Expects columns: transaction_id, category,
-    scope3_category, confidence, co2e_kg, leakage_flag, commute_pattern."""
-    rows = [
-        (
-            str(r.transaction_id), str(r.category), str(r.scope3_category),
-            float(r.confidence), float(r.co2e_kg), int(r.leakage_flag),
-            int(r.commute_pattern),
-            "auto" if r.confidence > 0.8 else "pending", None,
-        )
-        for r in df.itertuples(index=False)
-    ]
-    conn.execute("DELETE FROM classifications")
-    conn.executemany(
-        "INSERT INTO classifications VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", rows
-    )
-    conn.commit()
-
-
-def _joined_query(where=""):
-    return f"""
-        SELECT t.*, c.category, c.scope3_category, c.confidence, c.co2e_kg,
-               c.leakage_flag, c.commute_pattern, c.review_status,
-               c.reviewed_category
-        FROM transactions t JOIN classifications c USING (transaction_id)
-        {where}
-    """
-
-
-def get_eligible(conn):
-    """All transactions allowed to feed metrics and the MACC engine."""
-    placeholders = ",".join("?" * len(ELIGIBLE_STATUSES))
-    return pd.read_sql_query(
-        _joined_query(f"WHERE c.review_status IN ({placeholders})"),
-        conn, params=ELIGIBLE_STATUSES,
-    )
-
-
-def get_pending(conn):
-    return pd.read_sql_query(
-        _joined_query("WHERE c.review_status = 'pending' ORDER BY t.date, t.time"),
-        conn,
-    )
-
-
-def get_all(conn):
-    return pd.read_sql_query(_joined_query(), conn)
-
-
-def get_budgets(conn):
-    return dict(conn.execute("SELECT name, travel_budget_eur FROM departments"))
-
-
-def has_data(conn):
-    return conn.execute("SELECT COUNT(*) FROM classifications").fetchone()[0] > 0
-
-
-def set_review(conn, transaction_id, new_category=None):
-    """Approve a pending transaction; if new_category differs, mark it
-    corrected, re-derive scope and recompute its CO2e."""
-    from src import classification as classifier, emissions
-
-    row = conn.execute(
-        "SELECT c.category, t.amount_eur, t.payment_channel, t.expense_context"
-        " FROM classifications c JOIN transactions t USING (transaction_id)"
-        " WHERE c.transaction_id = ?",
-        (transaction_id,),
-    ).fetchone()
-    if row is None:
-        return
-    old_category, amount, channel, context = row
-
-    category = new_category or old_category
-    status = "corrected" if category != old_category else "approved"
-    scope3 = classifier.scope3_for(category, context)
-    leakage = int(classifier.is_leakage(category, channel, context))
-    co2e = emissions.co2e_kg(category, amount)
-    conn.execute(
-        "UPDATE classifications SET review_status = ?, reviewed_category = ?,"
-        " category = ?, scope3_category = ?, leakage_flag = ?, co2e_kg = ?"
-        " WHERE transaction_id = ?",
-        (status, category, category, scope3, leakage, co2e, transaction_id),
-    )
     conn.commit()

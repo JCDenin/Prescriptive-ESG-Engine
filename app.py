@@ -6,7 +6,7 @@ Run:  streamlit run app.py     (demo login: admin / admin)
 import streamlit as st
 
 from src import database as db
-from ui import accounts, overview, recommendations, review_queue, upload
+from ui import accounts, overview, recommendations, reports, review_queue, upload
 
 st.set_page_config(
     page_title="Prescriptive ESG Dashboard",
@@ -75,6 +75,7 @@ def login_gate(conn):
         if st.form_submit_button("Sign in", type="primary"):
             user = db.verify_user(conn, username, password)
             if user:
+                db.log_action(conn, user["username"], "auth.login", "Signed in")
                 token = db.create_session(conn, user["username"])
                 st.session_state["user"] = user
                 st.session_state["token"] = token
@@ -99,20 +100,23 @@ def main(conn):
         st.session_state.clear()
         st.rerun()
 
-    review_queue.render(conn)
+    review_queue.render(conn, user)
 
-    tab_names = ["Data Upload", "Emissions & Financial Overview", "Recommendations"]
+    tab_names = ["Data Upload", "Emissions & Financial Overview",
+                 "Recommendations", "Reports"]
     if user["role"] == "admin":
         tab_names.append("Team Accounts")
     tabs = st.tabs(tab_names)
     with tabs[0]:
-        upload.render(conn)
+        upload.render(conn, user)
     with tabs[1]:
         overview.render(conn)
     with tabs[2]:
         recommendations.render(conn)
+    with tabs[3]:
+        reports.render(conn)
     if user["role"] == "admin":
-        with tabs[3]:
+        with tabs[4]:
             accounts.render(conn, user)
 
 

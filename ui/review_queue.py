@@ -14,7 +14,7 @@ CATEGORY_OPTIONS = sorted(FACTORS_KG_PER_EUR)
 PAGE_SIZE = 15
 
 
-def render(conn):
+def render(conn, user):
     st.sidebar.markdown("### Review queue")
     if not db.has_data(conn):
         st.sidebar.caption("No data loaded.")
@@ -48,7 +48,8 @@ def render(conn):
                 key=f"cat_{row.transaction_id}",
             )
             if st.button("Approve", key=f"ok_{row.transaction_id}", type="primary"):
-                db.set_review(conn, row.transaction_id, new_category=choice)
+                db.set_review(conn, row.transaction_id, new_category=choice,
+                              reviewed_by=user["username"])
                 st.rerun()
     if not show_all:
         st.sidebar.caption(
