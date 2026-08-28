@@ -1,47 +1,38 @@
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+import io
 import pandas as pd
+from src.ingestion import load_and_validate_data
+from src.classification import classify_transactions
 
-REQUIRED_COLUMNS = [
-    'transaction_id', 'employee_id', 'department', 'date', 
-    'time', 'merchant_name', 'amount_eur', 'payment_channel', 'expense_context'
-]
+SAMPLE_CSV = """transaction_id,employee_id,department,date,time,merchant_name,amount_eur,payment_channel,expense_context
+TX001,EMP_010,Sales,2026-06-01,9:15,Delta Airlines,420.00,TMC_Corporate,Business_Trip
+TX002,EMP_014,Engineering,2026-06-02,19:40,Hilton Hotel Berlin,210.00,Personal_Card_Reimbursement,Business_Trip
+TX003,EMP_022,Marketing,2026-06-01,8:05,Metro Paris,2.10,Personal_Card_Reimbursement,Daily_Expense
+TX004,EMP_022,Marketing,2026-06-02,8:10,Metro Paris,2.10,Personal_Card_Reimbursement,Daily_Expense
+TX005,EMP_022,Marketing,2026-06-03,8:02,Metro Paris,2.10,Personal_Card_Reimbursement,Daily_Expense"""
 
-def load_and_validate_data(file_path: str) -> pd.DataFrame:
-    print(f" Attempting to load file: {file_path}")
-    df = pd.read_csv(file_path)
-    print(f" File loaded successfully. Found rows: {len(df)}, columns: {len(df.columns)}")
+def test_full_pipeline():
+    raw_df = load_and_validate_data(io.StringIO(SAMPLE_CSV))
+    result_df = classify_transactions(raw_df)
     
-    # Check for the presence of all 9 required columns
-    missing_cols = [col for col in REQUIRED_COLUMNS if col not in df.columns]
-    if missing_cols:
-        raise ValueError(f"Error! Missing required columns: {missing_cols}")
-    print(" Column check passed successfully. All 9 required columns are present.")
-        
-    # Data type validation
-    print(" Starting data type conversion and validation...")
+    # Check 1: TX001 is normal approved travel (no leakage)
+    assert result_df.loc[result_df['transaction_id'] == 'TX001', 'leakage_flag'].values[0] == 0
+    assert result_df.loc[result_df['transaction_id'] == 'TX001', 'scope3_category'].values[0] == 'Category 6'
     
-    # Count invalid amounts before filling with zeros
-    invalid_amounts = pd.to_numeric(df['amount_eur'], errors='coerce').isna().sum()
-    df['amount_eur'] = pd.to_numeric(df['amount_eur'], errors='coerce').fillna(0.0)
+    # Check 2: TX002 is Category 6 Leakage (Personal Card + Business Trip)
+    assert result_df.loc[result_df['transaction_id'] == 'TX002', 'leakage_flag'].values[0] == 1
+    assert result_df.loc[result_df['transaction_id'] == 'TX002', 'scope3_category'].values[0] == 'Category 6'
     
-    # Count invalid dates
-    invalid_dates = pd.to_datetime(df['date'], errors='coerce').isna().sum()
-    df['date'] = pd.to_datetime(df['date'], errors='coerce')
+    # Check 3: TX003-005 are recurring Category 7 commute patterns (no leakage)
+    assert (result_df.loc[result_df['transaction_id'].isin(['TX003', 'TX004', 'TX005']), 'leakage_flag'] == 0).all()
+    assert (result_df.loc[result_df['transaction_id'].isin(['TX003', 'TX004', 'TX005']), 'commute_pattern'] == 1).all()
+    assert (result_df.loc[result_df['transaction_id'].isin(['TX003', 'TX004', 'TX005']), 'scope3_category'] == 'Category 7').all()
     
-    if invalid_amounts > 0:
-        print(f"   [Warning] Found {invalid_amounts} invalid values in 'amount_eur' (replaced with 0.0)")
-    if invalid_dates > 0:
-        print(f"   [Warning] Found {invalid_dates} invalid dates in 'date' (replaced with NaT)")
-        
-    print(" Data type validation completed successfully.\n")
-    return df
+    print(" All validation checks passed successfully!")
 
-# Function call
-path = r"D:\ESG (VCBIP)\Prescriptive-ESG-Engine\tests\Sample Data.csv"
-
-try:
-    data = load_and_validate_data(path)
-    print("--- GLOBAL STATUS ---")
-    print(" Script executed the logic without critical errors!")
-    print(data.head(3))  # Displays the first 3 rows for visual verification
-except Exception as e:
-    print(f"\n Critical error during script execution: {e}")
+if __name__ == "__main__":
+    test_full_pipeline()
