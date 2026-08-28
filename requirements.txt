@@ -1,10 +1,17 @@
+# Runtime dependencies (what the MVP app actually imports).
+# Keep this list lean: Streamlit Community Cloud has ~1 GB memory and
+# heavy unused packages (torch) can break the deploy.
 streamlit>=1.30.0
 pandas>=2.0.0
 numpy>=1.24.0
-transformers>=4.35.0
-torch>=2.0.0
-scikit-learn>=1.3.0
-supabase>=2.0.0
-python-dotenv>=1.0.0
 plotly>=5.0.0
 openpyxl>=3.1.0
+
+# --- Deferred until the modules that need them land ---
+# Viktor's NLP classification engine:
+# transformers>=4.35.0
+# torch>=2.0.0
+# scikit-learn>=1.3.0
+# Production database (MVP uses SQLite, stdlib):
+# supabase>=2.0.0
+# python-dotenv>=1.0.0
