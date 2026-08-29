@@ -68,6 +68,11 @@ def _get_nlp_classifier():
             _nlp_pipeline = False
     return _nlp_pipeline
 
+from functools import lru_cache
+
+@lru_cache(maxsize=4096)  # NOTE (Viktor): pure optimization — merchant names
+# repeat heavily in large datasets, and without this each unknown-merchant ROW
+# triggers a fresh NLP inference. Same inputs -> same result, so caching is safe.
 def match_merchant(merchant_name: str):
     """Matches merchant name against dictionary with NLP fallback."""
     name = str(merchant_name).strip().lower()

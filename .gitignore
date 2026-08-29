@@ -25,3 +25,4 @@ Thumbs.db
 # Local databases and Claude tooling
 *.db
 .claude/
+data/mc_dataset_*.csv

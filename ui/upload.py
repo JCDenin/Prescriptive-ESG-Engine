@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from src import classification as classifier, database as db, ingestion
+from src import classification as classifier, database as db, ingestion, simulator
 
 SAMPLE_PATH = Path(__file__).resolve().parent.parent / "data" / "sample_transactions.csv"
 
@@ -81,6 +81,29 @@ def render(conn, user):
     if SAMPLE_PATH.exists() and col_b.button("Load bundled sample dataset"):
         _ingest(conn, pd.read_csv(SAMPLE_PATH, dtype={"time": str}),
                 SAMPLE_PATH.name, user, label or "Bundled sample")
+
+    with st.expander("Generate synthetic dataset (Monte Carlo simulation)"):
+        st.caption(
+            "Samples a random 'company world' (commuter share, travel "
+            "intensity, off-channel leakage rate, ...) from probability "
+            "distributions, then simulates day-by-day transactions: commute "
+            "times around personal habits, log-normal amounts, business-trip "
+            "bundles. Every run without a seed produces a different dataset."
+        )
+        g1, g2, g3 = st.columns([1, 1, 1])
+        n_rows = g1.number_input("Rows", min_value=500, max_value=50000,
+                                 value=10000, step=500)
+        seed_text = g2.text_input("Seed (blank = random)", value="")
+        if g3.button("Generate & ingest", type="primary"):
+            seed = int(seed_text) if seed_text.strip().lstrip("-").isdigit() else None
+            with st.spinner("Simulating and classifying..."):
+                sim_df, params = simulator.simulate(n_rows=int(n_rows), seed=seed)
+                st.session_state["mc_params"] = params
+                _ingest(conn, sim_df, f"monte_carlo_seed{params['seed']}.csv",
+                        user, label or f"Monte Carlo #{params['seed']}")
+        if "mc_params" in st.session_state:
+            st.markdown("**Sampled world parameters (last run)**")
+            st.json(st.session_state["mc_params"])
 
     st.divider()
     _history(conn, user)
