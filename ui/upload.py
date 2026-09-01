@@ -44,7 +44,7 @@ def _history(conn, user):
     view["active"] = view["active"].map({1: "● active", 0: ""})
     st.dataframe(
         view[["dataset_id", "label", "uploaded_by", "uploaded_at", "n_rows", "active"]],
-        width="stretch", hide_index=True,
+        use_container_width=True, hide_index=True,
     )
     inactive = datasets[datasets["is_active"] == 0]
     if not inactive.empty:
