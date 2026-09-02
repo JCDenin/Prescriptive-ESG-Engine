@@ -171,7 +171,7 @@ def main(conn):
     with tabs[2]:
         recommendations.render(conn)
     with tabs[3]:
-        reports.render(conn)
+        reports.render(conn, user)
     if user["role"] == "admin":
         with tabs[4]:
             accounts.render(conn, user)

@@ -41,8 +41,24 @@ UNKNOWN = ["Cafe Zentral GmbH", "City Parkhaus 24", "K+M Mobility Services",
            "Gasthaus Krone", "Stadtwerke Payment", "Kantine Nord"]
 
 
-def sample_world(rng):
-    """Draw the company-level parameters (the Monte Carlo priors)."""
+def sample_world(rng, demo_mode=False):
+    """Draw the company-level parameters (the Monte Carlo priors).
+
+    demo_mode narrows the priors toward a travel-heavy company with a real
+    off-channel problem, so a generated dataset reliably shows flagged
+    leakage cases and clear savings. The simulation and classification
+    logic are untouched — only the sampled world differs."""
+    if demo_mode:
+        return {
+            "commuter_share": rng.uniform(0.55, 0.70),
+            "rideshare_adoption": rng.uniform(0.25, 0.40),
+            "traveler_share": rng.uniform(0.30, 0.45),
+            "trip_prob_per_day": rng.uniform(0.05, 0.08),
+            "leakage_prob": rng.uniform(0.25, 0.35),
+            "unknown_merchant_prob": rng.uniform(0.02, 0.03),
+            "attendance_rate": rng.uniform(0.70, 0.80),
+            "months": 1,
+        }
     return {
         "commuter_share": rng.uniform(0.35, 0.65),
         "rideshare_adoption": rng.uniform(0.10, 0.35),
@@ -60,13 +76,13 @@ def _lognormal(rng, median, sigma, lo, hi):
     return round(min(hi, max(lo, rng.lognormvariate(math.log(median), sigma))), 2)
 
 
-def simulate(n_rows=10000, seed=None, world=None):
+def simulate(n_rows=10000, seed=None, world=None, demo_mode=False):
     """Returns (df, params). df has the 9 standard CSV columns; params
     documents the sampled world so a run is explainable to a jury."""
     if seed is None:
         seed = random.randrange(1_000_000)
     rng = random.Random(seed)
-    world = dict(world) if world else sample_world(rng)
+    world = dict(world) if world else sample_world(rng, demo_mode=demo_mode)
 
     start = date(2026, 6, 1)
     days = [start + timedelta(d) for d in range(world["months"] * 30)
@@ -158,7 +174,7 @@ def simulate(n_rows=10000, seed=None, world=None):
     df.insert(0, "transaction_id", [f"TX{i + 1:05d}" for i in range(len(df))])
 
     params = {"seed": seed, "n_rows": len(df), "n_employees": n_emp,
-              "period_days": len(days),
+              "period_days": len(days), "demo_mode": bool(demo_mode),
               **{k: (round(v, 3) if isinstance(v, float) else v)
                  for k, v in world.items()}}
     return df, params

@@ -8,6 +8,7 @@ import streamlit as st
 from src import classification as classifier, database as db, ingestion, simulator
 
 SAMPLE_PATH = Path(__file__).resolve().parent.parent / "data" / "sample_transactions.csv"
+DEMO_PATH = Path(__file__).resolve().parent.parent / "data" / "demo_dataset.csv"
 
 
 def _ingest(conn, raw: pd.DataFrame, source: str, user: dict, label: str):
@@ -74,11 +75,16 @@ def render(conn, user):
         "Dataset label (for the history)", placeholder="e.g. June 2026 export",
     )
     uploaded = st.file_uploader("Transaction CSV", type="csv")
-    col_a, col_b = st.columns([1, 3])
+    col_a, col_b, col_c = st.columns([1, 1, 2])
     if col_a.button("Process uploaded file", type="primary", disabled=uploaded is None):
         _ingest(conn, pd.read_csv(uploaded, dtype={"time": str}), uploaded.name,
                 user, label)
-    if SAMPLE_PATH.exists() and col_b.button("Load bundled sample dataset"):
+    if DEMO_PATH.exists() and col_b.button("Load jury demo dataset"):
+        # Pre-tested Monte Carlo run (seed 2029, demo mode): guaranteed
+        # visible leakage findings and savings — use this for presentations.
+        _ingest(conn, pd.read_csv(DEMO_PATH, dtype={"time": str}),
+                DEMO_PATH.name, user, label or "Jury demo (seed 2029)")
+    if SAMPLE_PATH.exists() and col_c.button("Load bundled sample dataset"):
         _ingest(conn, pd.read_csv(SAMPLE_PATH, dtype={"time": str}),
                 SAMPLE_PATH.name, user, label or "Bundled sample")
 
@@ -94,10 +100,17 @@ def render(conn, user):
         n_rows = g1.number_input("Rows", min_value=500, max_value=50000,
                                  value=10000, step=500)
         seed_text = g2.text_input("Seed (blank = random)", value="")
+        demo_mode = st.checkbox(
+            "Demo mode — priors tuned to a travel-heavy company with a real "
+            "off-channel problem, so findings are reliably visible",
+            value=True,
+        )
         if g3.button("Generate & ingest", type="primary"):
             seed = int(seed_text) if seed_text.strip().lstrip("-").isdigit() else None
             with st.spinner("Simulating and classifying..."):
-                sim_df, params = simulator.simulate(n_rows=int(n_rows), seed=seed)
+                sim_df, params = simulator.simulate(
+                    n_rows=int(n_rows), seed=seed, demo_mode=demo_mode
+                )
                 st.session_state["mc_params"] = params
                 _ingest(conn, sim_df, f"monte_carlo_seed{params['seed']}.csv",
                         user, label or f"Monte Carlo #{params['seed']}")

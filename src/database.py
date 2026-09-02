@@ -142,8 +142,8 @@ def ensure_schema(conn):
     if migrate_pw_flag:
         # One-shot: accounts still using their seeded default password must
         # change it on next sign-in (ported from Lab_Webapp mustChangePassword).
-        for username, password, _, _ in DEFAULT_USERS:
-            if verify_user(conn, username, password):
+        for username, password, _, _, must_change in DEFAULT_USERS:
+            if must_change and verify_user(conn, username, password):
                 conn.execute(
                     "UPDATE users SET must_change_password = 1 WHERE username = ?",
                     (username,),
@@ -384,14 +384,18 @@ def set_review(conn, transaction_id, new_category=None, reviewed_by="system"):
 SESSION_HOURS = 12
 
 # Roles: every team member can do everything (upload, review, datasets,
-# reports); 'admin' additionally manages accounts in the Team Accounts tab.
+# reports); 'admin' additionally manages accounts in the Team Accounts tab;
+# 'guest' (for the jury) uses the product fully but does not see the
+# internal review/audit trail.
 DEFAULT_USERS = [
-    # (username, password, display name, role)
-    ("admin", "admin", "Administrator", "admin"),
-    ("omar", "omar", "Omar (Developer)", "admin"),
-    ("viktor", "viktor", "Viktor (Developer)", "admin"),
-    ("vladlen", "vladlen", "Vladlen (Product Owner)", "analyst"),
-    ("vetalii", "vetalii", "Vetalii (Scrum Master)", "analyst"),
+    # (username, password, display name, role, must_change_password)
+    ("admin", "admin", "Administrator", "admin", True),
+    ("omar", "omar", "Omar (Developer)", "admin", True),
+    ("viktor", "viktor", "Viktor (Developer)", "admin", True),
+    ("vladlen", "vladlen", "Vladlen (Product Owner)", "analyst", True),
+    ("vetalii", "vetalii", "Vetalii (Scrum Master)", "analyst", True),
+    # Jury login: no forced password change (frictionless demo entry).
+    ("jury", "jury", "Guest (Jury)", "guest", False),
 ]
 
 
@@ -408,8 +412,9 @@ def ensure_default_users(conn):
     # Insert any missing default account (create_user is a no-op on
     # duplicates), so newly added team members appear on existing databases
     # too — not only on a fresh one.
-    for username, password, display_name, role in DEFAULT_USERS:
-        create_user(conn, username, password, display_name, role)
+    for username, password, display_name, role, must_change in DEFAULT_USERS:
+        create_user(conn, username, password, display_name, role,
+                    must_change=must_change)
     # The short-lived read-only 'viewer' role was removed: everyone works,
     # only admins manage accounts. Upgrade any leftover rows.
     conn.execute("UPDATE users SET role = 'analyst' WHERE role = 'viewer'")

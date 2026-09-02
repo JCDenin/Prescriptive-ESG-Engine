@@ -23,12 +23,14 @@ def main():
     ap.add_argument("--count", type=int, default=1, help="number of datasets")
     ap.add_argument("--seed", type=int, default=None,
                     help="base seed; dataset i uses seed+i (omit for random)")
+    ap.add_argument("--demo", action="store_true",
+                    help="demo-mode priors (reliably visible findings)")
     args = ap.parse_args()
 
     OUT_DIR.mkdir(exist_ok=True)
     for i in range(args.count):
         seed = None if args.seed is None else args.seed + i
-        df, params = simulate(n_rows=args.rows, seed=seed)
+        df, params = simulate(n_rows=args.rows, seed=seed, demo_mode=args.demo)
         out = OUT_DIR / f"mc_dataset_seed{params['seed']}.csv"
         df.to_csv(out, index=False)
         print(f"{out.name}: {len(df)} rows | world = "

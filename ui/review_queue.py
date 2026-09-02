@@ -30,9 +30,8 @@ def render(conn, user):
         "Low-confidence classifications. Approve or correct the category; "
         "reviewed records then count toward reports and recommendations."
     )
-    show_all = len(pending) <= PAGE_SIZE or st.sidebar.toggle(
-        f"Show all {len(pending)} pending", key="review_show_all"
-    )
+    show_all = (len(pending) <= PAGE_SIZE
+                or st.session_state.get("review_show_all", False))
     visible = pending if show_all else pending.head(PAGE_SIZE)
     for row in visible.itertuples():
         label = f"{row.merchant_name} — EUR {row.amount_eur:,.2f}"
@@ -51,7 +50,12 @@ def render(conn, user):
                 db.set_review(conn, row.transaction_id, new_category=choice,
                               reviewed_by=user["username"])
                 st.rerun()
-    if not show_all:
-        st.sidebar.caption(
-            f"...and {len(pending) - PAGE_SIZE} more — use the toggle above to show all."
-        )
+    if len(pending) > PAGE_SIZE:
+        if not show_all:
+            if st.sidebar.button(f"Show all {len(pending)} pending",
+                                 key="btn_show_all"):
+                st.session_state["review_show_all"] = True
+                st.rerun()
+        elif st.sidebar.button("Show less", key="btn_show_less"):
+            st.session_state["review_show_all"] = False
+            st.rerun()

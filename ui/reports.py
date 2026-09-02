@@ -103,7 +103,7 @@ def _review_trail(view, conn):
                      hide_index=True, height=220)
 
 
-def _exports(view, conn):
+def _exports(view, conn, include_audit=True):
     st.markdown("**Export**")
     c1, c2 = st.columns(2)
     c1.download_button(
@@ -133,7 +133,8 @@ def _exports(view, conn):
         view[view["leakage_flag"] == 1].to_excel(xl, sheet_name="Leakage", index=False)
         if not recs_df.empty:
             recs_df.to_excel(xl, sheet_name="Recommendations", index=False)
-        db.get_audit_log(conn, limit=500).to_excel(xl, sheet_name="Audit", index=False)
+        if include_audit:
+            db.get_audit_log(conn, limit=500).to_excel(xl, sheet_name="Audit", index=False)
     c2.download_button(
         "Download full report (Excel)", buffer.getvalue(),
         file_name="esg_report.xlsx",
@@ -141,11 +142,14 @@ def _exports(view, conn):
     )
 
 
-def render(conn):
+def render(conn, user):
     st.subheader("Reports")
     if not db.has_data(conn):
         st.info("Load data in the Data Upload tab to build reports.")
         return
+    # Guests (jury) get the full product view without internal account
+    # activity: the review/audit trail stays team-only.
+    show_audit = user["role"] != "guest"
 
     data = db.get_all(conn)
     view = _filters(data)
@@ -163,7 +167,8 @@ def render(conn):
     _breakdowns(view)
     st.divider()
     _leakage(view)
+    if show_audit:
+        st.divider()
+        _review_trail(view, conn)
     st.divider()
-    _review_trail(view, conn)
-    st.divider()
-    _exports(view, conn)
+    _exports(view, conn, include_audit=show_audit)
