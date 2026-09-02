@@ -12,22 +12,15 @@ A B2B SaaS platform calculating corporate Scope 3 emissions (Categories 6 & 7) f
 
 | Module | Owner | Status |
 |---|---|---|
-| `src/ingestion.py` — CSV parsing and validation | **Viktor** | In progress (his code, untouched) |
-| `src/classification.py` — transaction classifier | **Viktor** | ⚠ **STUB by Omar — replace with real engine** |
-| `src/emissions.py` — CO₂e calculation / factors | **Viktor** | ⚠ **STUB by Omar — replace with real factors** |
+| `src/ingestion.py` — CSV parsing and validation | Viktor | Done (MVP) |
+| `src/classification.py` — transaction classifier | Viktor | Done (MVP) |
+| `src/emissions.py` — CO₂e calculation / factors | Viktor | Done (MVP) |
 | `src/database.py` — SQLite schema, review workflow | Omar | Done (MVP) |
 | `src/recommendations.py` — MACC rule playbook | Omar | Done (MVP) |
 | `app.py` + `ui/` — dashboard, tabs, review queue | Omar | Done (MVP) |
 | `scripts/generate_data.py` — synthetic dataset | Omar | Done (seeded) |
 | `scripts/smoke_check.py` — pipeline acceptance checks | Omar | Done |
 
-**Viktor — integration contract:** `classify_transactions(df)` receives the 9 raw
-CSV columns and must return the dataframe with added columns `category`,
-`scope3_category`, `confidence` (0..1), `leakage_flag`, `commute_pattern`,
-`co2e_kg`. Everything downstream (review queue, metrics, MACC) depends only on
-that contract — `scripts/smoke_check.py` is the acceptance test, including the
-critical two-condition Category 6 rule (`Personal_Card_Reimbursement` **and**
-`Business_Trip`, never the payment channel alone).
 
 ## Local Setup
 
