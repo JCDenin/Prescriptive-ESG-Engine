@@ -7,7 +7,6 @@ import streamlit as st
 
 from src import classification as classifier, database as db, ingestion, simulator
 
-SAMPLE_PATH = Path(__file__).resolve().parent.parent / "data" / "sample_transactions.csv"
 DEMO_PATH = Path(__file__).resolve().parent.parent / "data" / "demo_dataset.csv"
 
 
@@ -75,18 +74,15 @@ def render(conn, user):
         "Dataset label (for the history)", placeholder="e.g. June 2026 export",
     )
     uploaded = st.file_uploader("Transaction CSV", type="csv")
-    col_a, col_b, col_c = st.columns([1, 1, 2])
+    col_a, col_b = st.columns([1, 3])
     if col_a.button("Process uploaded file", type="primary", disabled=uploaded is None):
         _ingest(conn, pd.read_csv(uploaded, dtype={"time": str}), uploaded.name,
                 user, label)
-    if DEMO_PATH.exists() and col_b.button("Load jury demo dataset"):
+    if DEMO_PATH.exists() and col_b.button("Load Demo Company Data"):
         # Pre-tested Monte Carlo run (seed 2029, demo mode): guaranteed
         # visible leakage findings and savings — use this for presentations.
         _ingest(conn, pd.read_csv(DEMO_PATH, dtype={"time": str}),
-                DEMO_PATH.name, user, label or "Jury demo (seed 2029)")
-    if SAMPLE_PATH.exists() and col_c.button("Load bundled sample dataset"):
-        _ingest(conn, pd.read_csv(SAMPLE_PATH, dtype={"time": str}),
-                SAMPLE_PATH.name, user, label or "Bundled sample")
+                DEMO_PATH.name, user, label or "Demo Company Data")
 
     with st.expander("Generate synthetic dataset (Monte Carlo simulation)"):
         st.caption(
@@ -118,55 +114,58 @@ def render(conn, user):
             st.markdown("**Sampled world parameters (last run)**")
             st.json(st.session_state["mc_params"])
 
-    # --- Interactive NLP Testing Sandbox ---
-    st.divider()
-    with st.expander("🧪 Free-text NLP Classifier Sandbox", expanded=False):
-        st.caption(
-            "Test how the zero-shot NLP model classifies unstructured "
-            "free-text transaction descriptions when no merchant rule is matched."
-        )
-        
-        user_input = st.text_input(
-            "Enter transaction description or merchant name:",
-            placeholder="e.g., Express shuttle bus ticket from airport to hotel",
-            key="sandbox_input"
-        )
-        
-        col_ctx, col_pay = st.columns(2)
-        with col_ctx:
-            context = st.selectbox(
-                "Expense Context", 
-                ["Business_Trip", "Daily_Expense"], 
-                key="sandbox_context"
+    # Internal testing tool: hidden from the jury (guest) view so the
+    # demo stays focused on the product.
+    if user["role"] != "guest":
+        # --- Interactive NLP Testing Sandbox ---
+        st.divider()
+        with st.expander("🧪 Free-text NLP Classifier Sandbox", expanded=False):
+            st.caption(
+                "Test how the zero-shot NLP model classifies unstructured "
+                "free-text transaction descriptions when no merchant rule is matched."
             )
-        with col_pay:
-            payment = st.selectbox(
-                "Payment Channel", 
-                ["TMC_Corporate", "Personal_Card_Reimbursement"], 
-                key="sandbox_payment"
+        
+            user_input = st.text_input(
+                "Enter transaction description or merchant name:",
+                placeholder="e.g., Express shuttle bus ticket from airport to hotel",
+                key="sandbox_input"
             )
+        
+            col_ctx, col_pay = st.columns(2)
+            with col_ctx:
+                context = st.selectbox(
+                    "Expense Context", 
+                    ["Business_Trip", "Daily_Expense"], 
+                    key="sandbox_context"
+                )
+            with col_pay:
+                payment = st.selectbox(
+                    "Payment Channel", 
+                    ["TMC_Corporate", "Personal_Card_Reimbursement"], 
+                    key="sandbox_payment"
+                )
 
-        if user_input.strip():
-            category, confidence = classifier.match_merchant(user_input.strip())
-            scope3 = classifier.scope3_for(category, context)
-            leakage = classifier.is_leakage(category, payment, context)
+            if user_input.strip():
+                category, confidence = classifier.match_merchant(user_input.strip())
+                scope3 = classifier.scope3_for(category, context)
+                leakage = classifier.is_leakage(category, payment, context)
 
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Predicted Category", category.title())
-            m2.metric("Scope 3", scope3)
-            m3.metric("Confidence Score", f"{confidence:.0%}")
-            m4.metric("Leakage Flag", "🚨 Yes" if leakage else "✅ No")
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Predicted Category", category.title())
+                m2.metric("Scope 3", scope3)
+                m3.metric("Confidence Score", f"{confidence:.0%}")
+                m4.metric("Leakage Flag", "🚨 Yes" if leakage else "✅ No")
 
-            if confidence < 0.80:
-                st.warning("⚠️ Confidence below 80% — this record would be routed to the **Human-in-the-Loop Review Queue**.")
-            else:
-                st.success("✅ High confidence — record would be **Auto-classified**.")
+                if confidence < 0.80:
+                    st.warning("⚠️ Confidence below 80% — this record would be routed to the **Human-in-the-Loop Review Queue**.")
+                else:
+                    st.success("✅ High confidence — record would be **Auto-classified**.")
 
     st.divider()
     _history(conn, user)
 
     if not db.has_data(conn):
-        st.info("No data loaded yet. Upload a CSV or load the sample dataset.")
+        st.info("No data loaded yet. Upload a CSV or click Load Demo Company Data.")
         return
 
     data = db.get_all(conn)

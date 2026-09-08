@@ -68,6 +68,17 @@ def _get_nlp_classifier():
             _nlp_pipeline = False
     return _nlp_pipeline
 
+
+def nlp_status():
+    """Whether the zero-shot NLP fallback is actually available in this
+    environment. Loads the model on first call (so it can be pre-warmed at
+    startup instead of during a user's first classification), then reports
+    the result. Used by the header's classification-mode indicator: the
+    engine silently degrades to rules-only when transformers is missing or
+    the model download fails, which changes the reported figures.
+    """
+    return bool(_get_nlp_classifier())
+
 from functools import lru_cache
 
 @lru_cache(maxsize=4096)  # NOTE (Viktor): pure optimization — merchant names

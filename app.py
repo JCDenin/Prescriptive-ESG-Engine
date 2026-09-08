@@ -5,7 +5,7 @@ Run:  streamlit run app.py     (demo login: admin / admin)
 
 import streamlit as st
 
-from src import database as db
+from src import classification, database as db
 from ui import accounts, overview, recommendations, reports, review_queue, upload
 
 st.set_page_config(
@@ -39,7 +39,19 @@ st.markdown(
         white-space: normal !important;
         overflow: visible !important;
         text-overflow: clip !important;
-        max-width: none !important;
+        /* Bound to the card, never wider: an unbounded max-width let the
+           delta pill size to its content and escape the card when the
+           column narrowed (browser zoom). Wrapping keeps text readable
+           without re-introducing the ellipsis truncation. */
+        max-width: 100% !important;
+        overflow-wrap: anywhere !important;
+    }
+    /* The delta ("N flagged transactions") is a flex pill: let it wrap
+       instead of pushing past the card edge. */
+    div[data-testid="stMetricDelta"] {
+        flex-wrap: wrap !important;
+        max-width: 100% !important;
+        height: auto !important;
     }
 </style>
     """,
@@ -50,6 +62,14 @@ st.markdown(
 @st.cache_resource
 def get_conn():
     return db.get_conn()
+
+
+@st.cache_resource
+def nlp_ready():
+    """Load the NLP model once at startup rather than during the first
+    classification: the model is a ~256 MB runtime download, and on a cold
+    container that delay would otherwise land on the user's first click."""
+    return classification.nlp_status()
 
 
 def restore_session(conn):
@@ -131,8 +151,8 @@ def _welcome(conn, user):
             st.markdown(f"### Welcome, {user['display_name']}")
             st.markdown(
                 "No dataset is active yet. Three steps to a full report:\n\n"
-                "1. **Load data** — open the *Data Upload* tab and load the "
-                "bundled sample dataset (or upload a CSV export).\n"
+                "1. **Load data** — open the *Data Upload* tab and click "
+                "**Load Demo Company Data** (or upload a CSV export).\n"
                 "2. **Review** — approve the low-confidence records in the "
                 "*Review queue* (sidebar); reviewed records count toward all "
                 "figures.\n"
@@ -149,6 +169,8 @@ def main(conn):
         "Transaction-based Scope 3 monitoring: business-travel leakage "
         "(Category 6) and commuting patterns (Category 7)"
     )
+    mode = "rules + NLP" if nlp_ready() else "rules only"
+    header_left.caption(f"Classification: {mode}")
     header_right.caption(f"{user['display_name']} · {user['role']}")
     if header_right.button("Sign out"):
         db.delete_session(conn, st.session_state.get("token", ""))
