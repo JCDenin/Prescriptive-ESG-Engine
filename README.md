@@ -28,16 +28,16 @@ A B2B SaaS platform calculating corporate Scope 3 emissions (Categories 6 & 7) f
 
 ## Accounts
 
-Each team member has a personal account. **Credentials are not published in this
-repository** — ask Omar for yours. On first sign-in the app requires you to replace
+Each team member has a personal account — ask Omar for your login. On first
+sign-in the app requires you to replace
 the temporary password with your own; admins can reset any account back to a
 temporary password from the **Team Accounts** tab (PBKDF2-hashed, stored in SQLite).
 
-The only documented account is the read-only guest login used for the defense:
+The only account documented here is the guest login used for the defense:
 
 | Login | Password | Access |
 |---|---|---|
-| `jury` | `jury` | Full product view; internal audit trail and developer tools hidden |
+| `jury` | `jury` | Full product view; internal audit trail and developer tools hidden. Not read-only — a guest can still approve review-queue records and switch or delete datasets. |
 
 Every team member can upload, review, manage datasets and export reports; only
 admins additionally get the **Team Accounts** tab. Sessions survive a page refresh

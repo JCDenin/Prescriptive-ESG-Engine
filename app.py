@@ -1,6 +1,6 @@
 """Prescriptive ESG Dashboard — MVP entry point.
 
-Run:  streamlit run app.py     (demo login: admin / admin)
+Run:  streamlit run app.py
 """
 
 import streamlit as st
