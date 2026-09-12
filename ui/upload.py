@@ -146,9 +146,12 @@ def render(conn, user):
                 )
 
             if user_input.strip():
-                category, confidence = classifier.match_merchant(user_input.strip())
-                scope3 = classifier.scope3_for(category, context)
-                leakage = classifier.is_leakage(category, payment, context)
+                with st.spinner("Classifying transaction (initializing NLP engine if cold start)..."):
+                    category, confidence = classifier.match_merchant(user_input.strip())
+                    scope3 = classifier.scope3_for(category, context)
+                    leakage = classifier.is_leakage(category, payment, context)
+
+            
 
                 m1, m2, m3, m4 = st.columns(4)
                 m1.metric("Predicted Category", category.title())
