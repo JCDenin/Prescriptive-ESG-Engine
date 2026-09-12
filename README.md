@@ -1,4 +1,4 @@
-# Prescriptive ESG Engine (MVP)
+# Emprint — Prescriptive ESG Engine (MVP)
 
 A B2B SaaS platform calculating corporate Scope 3 emissions (Categories 6 & 7) from transaction-level data and delivering actionable MACC recommendations.
 

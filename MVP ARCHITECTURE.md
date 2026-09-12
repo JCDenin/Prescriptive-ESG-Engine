@@ -1,4 +1,4 @@
-# **Prescriptive ESG Engine** 
+# **Emprint — Prescriptive ESG Engine** 
 
 MVP ARCHITECTURE
 

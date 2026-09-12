@@ -1,4 +1,4 @@
-"""Prescriptive ESG Dashboard — MVP entry point.
+"""Emprint — Prescriptive ESG Engine (MVP entry point).
 
 Run:  streamlit run app.py
 """
@@ -9,7 +9,7 @@ from src import classification, database as db
 from ui import accounts, overview, recommendations, reports, review_queue, upload
 
 st.set_page_config(
-    page_title="Prescriptive ESG Dashboard",
+    page_title="Emprint",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -64,7 +64,7 @@ def get_conn():
     return db.get_conn()
 
 
-@st.cache_resource
+@st.cache_resource(show_spinner="Initializing NLP engine (first start downloads the model)...")
 def nlp_ready():
     """Load the NLP model once at startup rather than during the first
     classification: the model is a ~256 MB runtime download, and on a cold
@@ -87,7 +87,7 @@ def restore_session(conn):
 
 
 def login_gate(conn):
-    st.title("Prescriptive ESG Dashboard")
+    st.title("Emprint")
     st.caption("Scope 3 Category 6 & 7 monitoring — MVP demo")
     with st.form("login"):
         username = st.text_input("Username")
@@ -111,7 +111,7 @@ def change_password_gate(conn):
     the account works, but nothing else is accessible until the user sets a
     password of their own."""
     user = st.session_state["user"]
-    st.title("Prescriptive ESG Dashboard")
+    st.title("Emprint")
     st.subheader(f"Welcome, {user['display_name']} — set your own password")
     st.caption(
         "You are signing in with a temporary password. Choose a new one to "
@@ -164,7 +164,7 @@ def _welcome(conn, user):
 def main(conn):
     user = st.session_state["user"]
     header_left, header_right = st.columns([5, 1])
-    header_left.title("Prescriptive ESG Dashboard")
+    header_left.title("Emprint")
     header_left.caption(
         "Transaction-based Scope 3 monitoring: business-travel leakage "
         "(Category 6) and commuting patterns (Category 7)"
