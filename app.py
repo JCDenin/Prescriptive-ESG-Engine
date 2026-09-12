@@ -26,6 +26,17 @@ st.markdown(
         background: rgba(128, 128, 128, 0.07);
         border: 1px solid rgba(128, 128, 128, 0.28);
         border-radius: 8px; padding: 12px 16px;
+        /* Columns are already equal height; without this the card itself
+           shrinks to its content, so a card with a delta (or a wrapped
+           value) stands taller than its neighbours and the row looks
+           ragged. Filling the column keeps every box aligned. */
+        height: 100%;
+    }
+    /* height:100% above only resolves if Streamlit's intermediate wrappers
+       are full height too; scoped with :has so only metric rows change. */
+    div[data-testid="stColumn"] > div[data-testid="stVerticalBlock"]:has(div[data-testid="stMetric"]),
+    div[data-testid="stElementContainer"]:has(> div[data-testid="stMetric"]) {
+        height: 100%;
     }
     /* Metric text must adapt to zoom/narrow columns instead of truncating.
        Streamlit applies the ellipsis on nested inner nodes, so the override
@@ -52,6 +63,10 @@ st.markdown(
         flex-wrap: wrap !important;
         max-width: 100% !important;
         height: auto !important;
+        /* Streamlit's 9999px pill radius turns into a blob once the label
+           wraps to a second line; a tag radius matching the card stays tidy. */
+        border-radius: 8px !important;
+        width: fit-content;
     }
 </style>
     """,
