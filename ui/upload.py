@@ -92,7 +92,9 @@ def render(conn, user):
             "times around personal habits, log-normal amounts, business-trip "
             "bundles. Every run without a seed produces a different dataset."
         )
-        g1, g2, g3 = st.columns([1, 1, 1])
+        # Bottom-align: the labelled inputs sit lower than the unlabelled
+        # button, so top alignment left the button floating above them.
+        g1, g2, g3 = st.columns([1, 1, 1], vertical_alignment="bottom")
         n_rows = g1.number_input("Rows", min_value=500, max_value=50000,
                                  value=10000, step=500)
         seed_text = g2.text_input("Seed (blank = random)", value="")

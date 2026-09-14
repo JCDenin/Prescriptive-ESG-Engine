@@ -44,7 +44,7 @@ def render(conn, current_user):
     st.dataframe(users, width="stretch", hide_index=True)
 
     st.markdown("**Reset a password**")
-    r1, r2, r3 = st.columns([2, 2, 1])
+    r1, r2, r3 = st.columns([2, 2, 1], vertical_alignment="bottom")
     reset_target = r1.selectbox("Account", list(users["username"]), key="pw_reset_user")
     temp_pw = r2.text_input("Temporary password", type="password", key="pw_reset_val")
     if r3.button("Reset"):
@@ -60,7 +60,7 @@ def render(conn, current_user):
 
     removable = [u for u in users["username"] if u != current_user["username"]]
     if removable:
-        c1, c2 = st.columns([2, 1])
+        c1, c2 = st.columns([2, 1], vertical_alignment="bottom")
         target = c1.selectbox("Remove account", removable)
         if c2.button("Remove", type="secondary"):
             db.delete_user(conn, target)
