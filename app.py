@@ -79,7 +79,7 @@ def get_conn():
     return db.get_conn()
 
 
-@st.cache_resource(show_spinner="Initializing NLP engine (first start downloads the model)...")
+@st.cache_resource(show_spinner="Initializing NLP engine (first run downloads the model)...")
 def nlp_ready():
     """Load the NLP model once at startup rather than during the first
     classification: the model is a ~256 MB runtime download, and on a cold
