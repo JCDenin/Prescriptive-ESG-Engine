@@ -3,10 +3,66 @@
 Run:  streamlit run app.py
 """
 
+import re
+from functools import lru_cache
+from pathlib import Path
+
 import streamlit as st
 
 from src import classification, database as db
 from ui import accounts, overview, recommendations, reports, review_queue, upload
+
+ASSETS = Path(__file__).resolve().parent / "assets"
+
+
+@lru_cache(maxsize=1)
+def _logo():
+    """Theme-aware Emprint logo built from the designer's two SVG exports.
+
+    Both exports share identical paths and differ only in their class fill
+    colours, so one inline SVG is emitted and every class gets
+    ``fill: light-dark(<light>, <dark>)``. Streamlit sets ``color-scheme`` on
+    the app container from the *active* theme, so the logo follows the
+    in-app Light/Dark switch live. ``st.context.theme`` was not used: it is
+    documented to report the wrong theme on first load and mid-switch
+    (streamlit#11920). Browsers without ``light-dark()`` keep the light fill.
+
+    Returns ``(css, svg_markup)``.
+    """
+    light = (ASSETS / "logo_lightmode.svg").read_text(encoding="utf-8")
+    dark = (ASSETS / "logo_darkmode.svg").read_text(encoding="utf-8")
+
+    def fills(svg):
+        return dict(re.findall(r"\.(\w+)\{fill:(#[0-9A-Fa-f]{3,8});\}", svg))
+
+    light_fills, dark_fills = fills(light), fills(dark)
+    css = "".join(
+        f".emprint-logo .emprint-{cls}{{fill:{lf};"
+        f"fill:light-dark({lf},{dark_fills.get(cls, lf)});}}"
+        for cls, lf in light_fills.items()
+    )
+    css += (
+        ".emprint-logo{margin:0.25rem 0 0.75rem;line-height:0;}"
+        ".emprint-logo svg{height:3.25rem;width:auto;max-width:100%;display:block;}"
+    )
+    view_box = re.search(r'viewBox="([^"]+)"', light).group(1)
+    paths = "".join(
+        re.sub(r'class="(\w+)"', r'class="emprint-\1"', re.sub(r"\s+", " ", path))
+        for path in re.findall(r"<path\b.*?/>", light, flags=re.S)
+    )
+    svg = (
+        f'<svg viewBox="{view_box}" role="img" aria-label="Emprint" '
+        f'xmlns="http://www.w3.org/2000/svg"><title>Emprint</title>{paths}</svg>'
+    )
+    return css, svg
+
+
+def render_logo(container=st):
+    """Render the logo in place of a text title. The markup is a single line
+    so Markdown treats it as one raw HTML block."""
+    container.markdown(f'<div class="emprint-logo">{_logo()[1]}</div>',
+                       unsafe_allow_html=True)
+
 
 st.set_page_config(
     page_title="Emprint",
@@ -72,6 +128,7 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+st.markdown(f"<style>{_logo()[0]}</style>", unsafe_allow_html=True)
 
 
 @st.cache_resource
@@ -102,7 +159,7 @@ def restore_session(conn):
 
 
 def login_gate(conn):
-    st.title("Emprint")
+    render_logo()
     st.caption("Scope 3 Category 6 & 7 monitoring — MVP demo")
     with st.form("login"):
         username = st.text_input("Username")
@@ -126,7 +183,7 @@ def change_password_gate(conn):
     the account works, but nothing else is accessible until the user sets a
     password of their own."""
     user = st.session_state["user"]
-    st.title("Emprint")
+    render_logo()
     st.subheader(f"Welcome, {user['display_name']} — set your own password")
     st.caption(
         "You are signing in with a temporary password. Choose a new one to "
@@ -179,7 +236,7 @@ def _welcome(conn, user):
 def main(conn):
     user = st.session_state["user"]
     header_left, header_right = st.columns([5, 1])
-    header_left.title("Emprint")
+    render_logo(header_left)
     header_left.caption(
         "Transaction-based Scope 3 monitoring: business-travel leakage "
         "(Category 6) and commuting patterns (Category 7)"
