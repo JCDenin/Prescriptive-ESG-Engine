@@ -21,6 +21,10 @@ def render(conn, user):
         return
 
     pending = db.get_pending(conn)
+    # Off-channel (leakage-flagged) records first: they are the highest-value
+    # reviews and the note below points at them. The stable sort keeps the
+    # date order within each group.
+    pending = pending.sort_values("leakage_flag", ascending=False, kind="stable")
     st.sidebar.markdown(f"**Pending Review ({len(pending)})**")
     if pending.empty:
         st.sidebar.caption("All records reviewed. Figures include the full dataset.")
@@ -30,11 +34,20 @@ def render(conn, user):
         "Low-confidence classifications. Approve or correct the category; "
         "reviewed records then count toward reports and recommendations."
     )
+    flagged = pending[pending["leakage_flag"] == 1]
+    if not flagged.empty:
+        st.sidebar.caption(
+            f"{len(flagged)} flagged as off-channel travel "
+            f"(EUR {flagged['amount_eur'].sum():,.0f}), not yet in the "
+            "dashboard or reports: excluded until reviewed."
+        )
     show_all = (len(pending) <= PAGE_SIZE
                 or st.session_state.get("review_show_all", False))
     visible = pending if show_all else pending.head(PAGE_SIZE)
     for row in visible.itertuples():
         label = f"{row.merchant_name} — EUR {row.amount_eur:,.2f}"
+        if row.leakage_flag:
+            label += " · off-channel"
         with st.sidebar.expander(label):
             st.caption(
                 f"{row.transaction_id} · {row.date} {row.time} · "

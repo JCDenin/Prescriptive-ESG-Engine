@@ -50,6 +50,7 @@ def rule_leakage(eligible_df):
     ]
     if leaks.empty:
         return recs
+    all_leaks = eligible_df[eligible_df["leakage_flag"] == 1]
     lost = leaks["amount_eur"].sum() * CORPORATE_DISCOUNT
     recs.append({
         "rule": "Rule 2 — Travel Leakage",
@@ -58,11 +59,16 @@ def rule_leakage(eligible_df):
         "department": ", ".join(sorted(leaks["department"].unique())),
         "saving_eur": round(lost, 2),
         "saving_co2e_kg": 0.0,
+        # Stated as a share of the total off-channel spend so it reads as a
+        # subset of the Overview figure, not a competing leakage number.
         "rationale": (
-            f"EUR {leaks['amount_eur'].sum():,.0f} of business travel was paid "
-            f"on personal cards outside the corporate booking tool, forfeiting "
-            f"the ~{CORPORATE_DISCOUNT:.0%} corporate discount. Route these "
-            f"bookings through the TMC to recover the saving."
+            f"{len(leaks)} of the {len(all_leaks)} flagged off-channel bookings "
+            f"are above EUR {LEAKAGE_AMOUNT_THRESHOLD:.0f}: EUR "
+            f"{leaks['amount_eur'].sum():,.0f} of the EUR "
+            f"{all_leaks['amount_eur'].sum():,.0f} total off-channel travel "
+            f"spend. Booked outside the corporate tool, they forfeit the "
+            f"~{CORPORATE_DISCOUNT:.0%} corporate discount; route them through "
+            f"the TMC to recover it."
         ),
         "detail": leaks[
             ["transaction_id", "department", "date", "merchant_name", "amount_eur"]

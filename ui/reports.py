@@ -70,10 +70,17 @@ def _breakdowns(view):
     right.plotly_chart(fig, width="stretch")
 
 
-def _leakage(view):
+def _leakage(view, pending):
     leaks = view[view["leakage_flag"] == 1]
     st.markdown(f"**Category 6 leakage detail — {len(leaks)} transactions, "
                 f"EUR {leaks['amount_eur'].sum():,.0f}**")
+    waiting = pending[pending["leakage_flag"] == 1]
+    if not waiting.empty:
+        st.caption(
+            f"Plus {len(waiting)} flagged transaction(s) (EUR "
+            f"{waiting['amount_eur'].sum():,.0f}) still pending review in the "
+            "sidebar queue, excluded until reviewed."
+        )
     if leaks.empty:
         st.caption("No off-channel business travel in the current filter.")
         return
@@ -103,34 +110,41 @@ def _review_trail(view, conn):
                      hide_index=True, height=220)
 
 
-def _exports(view, conn, include_audit=True):
+def _exports(view_all, view, conn, include_audit=True):
+    """view_all: every filtered record (with review_status); view: the
+    eligible subset that every figure is computed from."""
     st.markdown("**Export**")
     c1, c2 = st.columns(2)
     c1.download_button(
-        "Download filtered data (CSV)",
-        view.to_csv(index=False).encode("utf-8"),
+        "Download filtered records (CSV)",
+        view_all.to_csv(index=False).encode("utf-8"),
         file_name="esg_report_data.csv", mime="text/csv",
     )
 
     buffer = io.BytesIO()
-    recs = recommend.generate_recommendations(
-        view[view["review_status"].isin(db.ELIGIBLE_STATUSES)], db.get_budgets(conn)
-    )
+    recs = recommend.generate_recommendations(view, db.get_budgets(conn))
     recs_df = pd.DataFrame(
         [{k: v for k, v in r.items() if k != "detail"} for r in recs]
     )
+    pending = view_all[view_all["review_status"] == "pending"]
+    leaks = view[view["leakage_flag"] == 1]
+    waiting = pending[pending["leakage_flag"] == 1]
     summary = pd.DataFrame({
-        "metric": ["Transactions", "Total CO2e (kg)", "Total spend (EUR)",
-                   "Leakage spend (EUR)", "Pending review"],
+        "metric": ["Transactions counted (reviewed or auto-classified)",
+                   "Total CO2e (kg)", "Total spend (EUR)",
+                   "Off-channel travel spend (EUR)",
+                   "Flagged off-channel transactions",
+                   "Pending review (excluded from figures)",
+                   "Pending flagged off-channel spend (EUR, excluded)"],
         "value": [len(view), round(view["co2e_kg"].sum(), 1),
                   round(view["amount_eur"].sum(), 2),
-                  round(view.loc[view["leakage_flag"] == 1, "amount_eur"].sum(), 2),
-                  int((view["review_status"] == "pending").sum())],
+                  round(leaks["amount_eur"].sum(), 2), len(leaks),
+                  len(pending), round(waiting["amount_eur"].sum(), 2)],
     })
     with pd.ExcelWriter(buffer, engine="openpyxl") as xl:
         summary.to_excel(xl, sheet_name="Summary", index=False)
-        view.to_excel(xl, sheet_name="Transactions", index=False)
-        view[view["leakage_flag"] == 1].to_excel(xl, sheet_name="Leakage", index=False)
+        view_all.to_excel(xl, sheet_name="Transactions", index=False)
+        leaks.to_excel(xl, sheet_name="Leakage", index=False)
         if not recs_df.empty:
             recs_df.to_excel(xl, sheet_name="Recommendations", index=False)
         if include_audit:
@@ -152,23 +166,42 @@ def render(conn, user):
     show_audit = user["role"] != "guest"
 
     data = db.get_all(conn)
-    view = _filters(data)
-    if view.empty:
+    view_all = _filters(data)
+    if view_all.empty:
         st.warning("No transactions match the current filter.")
         return
+    # Same basis as the Overview and the MACC engine: only reviewed or
+    # auto-classified records count toward any figure. Pending records are
+    # reported separately, so a number never differs between tabs.
+    view = view_all[view_all["review_status"].isin(db.ELIGIBLE_STATUSES)]
+    pending = view_all[view_all["review_status"] == "pending"]
+    leaks = view[view["leakage_flag"] == 1]
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Transactions", f"{len(view):,}")
-    c2.metric("CO2e", f"{view['co2e_kg'].sum() / 1000:,.2f} t")
+    c1.metric("Transactions counted", f"{len(view):,}",
+              help="Reviewed or auto-classified records. Pending records are "
+                   "excluded until reviewed, same as the Overview.")
+    c2.metric("CO2e", f"{view['co2e_kg'].sum() / 1000:,.1f} t")
     c3.metric("Spend", f"EUR {view['amount_eur'].sum():,.0f}")
-    c4.metric("Leakage", f"EUR {view.loc[view['leakage_flag'] == 1, 'amount_eur'].sum():,.0f}")
+    c4.metric("Off-channel travel spend", f"EUR {leaks['amount_eur'].sum():,.0f}",
+              delta=f"{len(leaks)} flagged transactions", delta_color="inverse")
+    if not pending.empty:
+        st.caption(
+            f"Figures match the Overview: {len(pending)} records pending review "
+            f"(EUR {pending['amount_eur'].sum():,.0f}) are excluded until "
+            "reviewed in the sidebar queue."
+        )
+    if view.empty:
+        st.info("Every record in the current filter is still pending review; "
+                "figures appear once records are reviewed.")
+        return
 
     _trend(view)
     _breakdowns(view)
     st.divider()
-    _leakage(view)
+    _leakage(view, pending)
     if show_audit:
         st.divider()
         _review_trail(view, conn)
     st.divider()
-    _exports(view, conn, include_audit=show_audit)
+    _exports(view_all, view, conn, include_audit=show_audit)
